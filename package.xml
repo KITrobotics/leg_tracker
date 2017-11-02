@@ -1,0 +1,39 @@
+<package format="2">
+    <name>cob_leg_tracker</name>
+    <version>0.0.0</version>
+    <description>Leg Detector to find leg-like patterns of laser scanner readings.</description>
+    <maintainer email="unduh@todo.todo">unduh</maintainer>
+    <author>Daniel Azanov</author>
+    <license>TODO</license>
+
+    <buildtool_depend>catkin</buildtool_depend>
+    <build_depend>roslint</build_depend>
+    
+    <build_depend>libpcl-all-dev</build_depend>
+    <depend>libpcl-all</depend>
+    
+    <depend>geometry_msgs</depend>
+    <depend>laser_geometry</depend>
+    <depend>roscpp</depend>
+    <depend>sensor_msgs</depend>
+    <depend>std_msgs</depend>
+    <depend>std_srvs</depend>
+    <depend>tf2</depend>
+    <depend>tf2_ros</depend>
+<!--     <depend>cv_bridge</depend> -->
+
+<!--     <depend>actionlib</depend> -->
+<!--     <depend>boost</depend> -->
+<!--     <depend>cob_srvs</depend> -->
+<!--     <depend>control_msgs</depend> -->
+<!--     <depend>diagnostic_msgs</depend> -->
+<!--     <depend>dpkg</depend> -->
+<!--     <depend>libntcan</depend> -->
+<!--     <depend>libpcan</depend> -->
+<!--     <depend>libusb-dev</depend> -->
+<!--     <depend>trajectory_msgs</depend> -->
+<!--     <depend>urdf</depend> -->
+
+<!-- 	<exec_depend>laser_filters</exec_depend> -->
+
+</package>

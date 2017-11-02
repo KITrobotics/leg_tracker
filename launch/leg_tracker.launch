@@ -1,0 +1,6 @@
+<launch>
+  <node pkg="cob_leg_tracker" type="cob_leg_tracker" name="leg_detection" output="screen">
+    <rosparam command="load" file="$(find cob_leg_tracker)/launch/parameter.yaml"/>
+    <!-- controllers <remap from="~input_scan" to="/base_laser_front/scan" /> -->
+  </node>
+</launch>
