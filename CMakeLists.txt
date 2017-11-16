@@ -15,6 +15,9 @@ find_package(catkin REQUIRED COMPONENTS
 #   message_generation 
   roslint 
   roscpp 
+  pluginlib
+  roslib
+  rosconsole
   sensor_msgs 
   std_msgs 
   std_srvs 
@@ -29,22 +32,41 @@ find_package(catkin REQUIRED COMPONENTS
 #   trajectory_msgs 
 #   urdf
 )
-find_package( OpenCV REQUIRED )
+find_package(Eigen3 REQUIRED) 
+find_package(OpenCV REQUIRED)
 
 find_package(Boost REQUIRED)
 
 catkin_package(
+  INCLUDE_DIRS include
+  LIBRARIES kalman
   CATKIN_DEPENDS std_msgs
+  DEPENDS Eigen3
 )
 
+add_library(kalman src/kalman_filter.cpp)
+target_link_libraries(kalman ${catkin_LIBRARIES} ${Boost_LIBRARIES})
 
-include_directories(include ${Boost_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
+include_directories(
+  include 
+  ${Boost_INCLUDE_DIRS} 
+  ${catkin_INCLUDE_DIRS} 
+  ${OpenCV_INCLUDE_DIRS} 
+  ${Eigen_INCLUDE_DIRS}
+  )
 # include_directories(include ${Boost_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS})
 
 add_executable(${PROJECT_NAME} src/cob_leg_tracker.cpp)
 # set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS "-DOSNAME_LINUX -DWITH_ESD_CAN")
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(${PROJECT_NAME} ${Boost_INCLUDE_DIRS} ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
+target_link_libraries(
+  ${PROJECT_NAME} 
+  kalman 
+  ${Boost_INCLUDE_DIRS} 
+  ${Eigen_LIBRARIES}
+  ${catkin_LIBRARIES} 
+  ${OpenCV_LIBRARIES}
+  )
 # target_link_libraries(${PROJECT_NAME} ${Boost_INCLUDE_DIRS} ${catkin_LIBRARIES})
 
 

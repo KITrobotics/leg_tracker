@@ -20,6 +20,16 @@
     <depend>std_srvs</depend>
     <depend>tf2</depend>
     <depend>tf2_ros</depend>
+    <depend>rosconsole</depend>
+    <depend>pluginlib</depend>
+    
+
+    
+    <export>
+      <cob_leg_tracker plugin="${prefix}/kalman_filter_plugin.xml" />
+    </export>
+    
+    
 <!--     <depend>cv_bridge</depend> -->
 
 <!--     <depend>actionlib</depend> -->

@@ -27,11 +27,29 @@
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/sample_consensus/sac.h>
 #include <visualization_msgs/Marker.h>
+#include <pcl/filters/radius_outlier_removal.h>
+#include <iostream>
+#include "kalman_filter.h"
+#include <pcl/common/centroid.h>
+
+
+
+
+
+/*
+ * TODO:
+ * N1 ~ new people appeared
+ * N2 ~ continue tracking of already tracked people which were occluded
+ * N1 = 0.7 and N2 = 1.2
+ * 
+ */
+
 
 
 
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
 
+const int cluster_size = 2;
 
 class LegDetector
 {
@@ -49,6 +67,12 @@ private:
   tf2_ros::Buffer tfBuffer;
   tf2_ros::TransformListener tfListener;
   ros::Publisher vis_pub;
+  double ransac_dist_threshold;
+  std::string circle_fitting;
+
+  // Construct the filter
+  filters::MultiChannelFilterBase<double>* left_leg_filter;
+  filters::MultiChannelFilterBase<double>* right_leg_filter;
 
 public:
   ros::NodeHandle nh_;
@@ -60,12 +84,68 @@ public:
     nh_.param("x_upper_limit", x_upper_limit, 0.5);
     nh_.param("y_lower_limit", y_lower_limit, -0.5);
     nh_.param("y_upper_limit", y_upper_limit, 0.5);
+    nh_.param("ransac_dist_threshold", ransac_dist_threshold, 0.1);
+    nh_.param("circle_fitting", circle_fitting, std::string("centroid"));
     
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 10, &LegDetector::processLaserScan, this);
     pub = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 10);
     pub2 = nh_.advertise<PointCloud> ("scan2pclCloud", 100);
     vis_pub = nh_.advertise<visualization_msgs::Marker>("leg_circles", 0);
+    
+      
 
+    int n = 6; // Number of states
+    int m = 2; // Number of measurements
+
+    double dt = 1.0/20; // Time step
+    
+    Eigen::MatrixXd A(n, n); // System dynamics matrix
+//     Eigen::MatrixXd B(n, m);
+    Eigen::MatrixXd C(m, n); // Output matrix
+    Eigen::MatrixXd Q(n, n); // Process noise covariance
+    Eigen::MatrixXd R(m, m); // Measurement noise covariance
+    Eigen::MatrixXd P(n, n); // Estimate error covariance
+    
+    A << 1, 0, dt, 0, pow(dt, 2) / 2, 0, 
+	 0, 1, 0, dt, 0, pow(dt, 2)/2, 
+	 0, 0, 1, 0, dt, 0,
+	 0, 0, 0, 1, 0, dt,
+	 0, 0, 0, 0, 1, 0,
+	 0, 0, 0, 0, 0, 1;
+//     B << (dt^2) / 2, 0, 0, (dt^2) / 2, dt, 0, 0, dt;
+    C << 1, 0, 0, 0, 0, 0, 
+	 0, 1, 0, 0, 0, 0;
+
+    // Reasonable covariance matrices
+    Q << 0.5, 0, 0, 0, 0, 0, 
+	 0, 0.5, 0, 0, 0, 0, 
+	 0, 0, 0.5, 0, 0, 0,
+	 0, 0, 0, 0.5, 0, 0,
+	 0, 0, 0, 0, 0.5, 0,
+	 0, 0, 0, 0, 0, 0.5;
+//     Q << .05, .05, .0, 
+// 	 .05, .05, .0, 
+// 	 .0, .0, .0;
+    R << pow(0.04, 2), 0, 
+	 0, pow(0.04, 2);
+//     P.setIdentity();
+    P << 10, 0, 0, 0, 0, 0, 
+	 0, 10, 0, 0, 0, 0, 
+	 0, 0, 10, 0, 0, 0,
+	 0, 0, 0, 10, 0, 0,
+	 0, 0, 0, 0, 10, 0,
+	 0, 0, 0, 0, 0, 10;
+//     P << .1, .1, .1, 
+// 	 .1, 10000, 10, 
+// 	 .1, 10, 100;
+    
+    Eigen::VectorXd x0(n);
+    x0 << 0, 0, 0;
+    
+    left_leg_filter = new filters::KalmanFilter<double>(0.0, A, C, Q, R, P, x0);
+    left_leg_filter->configure();
+    right_leg_filter = new filters::KalmanFilter<double>(0.0, A, C, Q, R, P, x0);
+    right_leg_filter->configure();
   }
   ~LegDetector() {}
   
@@ -76,38 +156,14 @@ public:
   }
   
   
-  void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
+  void laserScanToPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, sensor_msgs::PointCloud2& cloud)
   {
-//     if(!tfListener.waitForTransform(scan->header.frame_id, "/base_link",
-//           scan->header.stamp + ros::Duration().fromSec(scan->ranges.size()*scan->time_increment),
-//           ros::Duration(1.0))){
-//        return;
-//     }
-
-    // project the laser into a point cloud
-    
-    sensor_msgs::PointCloud2 cloud;
-    
-//     cloud.header = scan->header;
-
-    // project the scan into a point cloud
-//     try
-//     {
-//       projector_.transformLaserScanToPointCloud(scan->header.frame_id, *scan, cloud, *tf_);
-//     }
-//     catch (tf::TransformException &ex)
-//     {
-//       ROS_WARN("High fidelity enabled, but TF returned a transform exception to frame %s: %s", global_frame_.c_str(),
-// 	      ex.what());
-    
-  
-    
     projector_.projectLaser(*scan, cloud);
-    
-//   }
-//     projector_.transformLaserScanToPointCloud("/base_link", *scan, cloud, tfListener);
-    
- 
+  }
+  
+  void tfTransformOfPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, 
+				sensor_msgs::PointCloud2& from, sensor_msgs::PointCloud2& to)
+  {
     geometry_msgs::TransformStamped transformStamped;
     try{
       transformStamped = tfBuffer.lookupTransform(transform_link, scan->header.frame_id, ros::Time(0));
@@ -117,58 +173,44 @@ public:
       ros::Duration(1.0).sleep();
       return;
     }
-    sensor_msgs::PointCloud2 cloud_transformed;
-    
-    tf2::doTransform(cloud, cloud_transformed, transformStamped);
-
-
-//     pcl_ros::transformPointCloud(pcl_pc_laser, pcl_transformed, transform);
+    tf2::doTransform(from, to, transformStamped);
+  }
   
-//     pcl_acc+=pcl_transformed; 
-    
-    
-    
-    pub.publish(cloud_transformed); 
-    
-//     const sensor_msgs::PointCloud2ConstPtr& kinect_output
-    pcl::PCLPointCloud2::Ptr pc2 (new pcl::PCLPointCloud2());
-
-    pcl_conversions::toPCL (cloud_transformed, *pc2);
-/*
-    pcl::PCLPointCloud2::Ptr cloud_filtered (new pcl::PCLPointCloud2 ());
-
-    pcl::VoxelGrid<pcl::PCLPointCloud2> sor;
-    sor.setInputCloud (pc2);
-    sor.setLeafSize(0.01f,0.01f,0.01f);
-    sor.filter(*cloud_filtered);// filter the point cloud*/
-
-//     pcl::PointCloud<pcl::PointXYZ>::Ptr cloudXYZ (new pcl::PointCloud<pcl::PointXYZ>);//object cloud for point cloud type XYZ
-    PointCloud cloudXYZ;
-    pcl::fromPCLPointCloud2(*pc2, cloudXYZ);
-
-    
-    PointCloud cloud_filtered;
-    PointCloud input_cloud;
+  void filterPCLPointCloud(PointCloud& in, PointCloud& out)
+  {
+    PointCloud path_throw_filtered_x;
+    PointCloud path_throw_filtered_y;
+    PointCloud sor_filtered;
     
     pcl::PassThrough<pcl::PointXYZ> pass;
-    pass.setInputCloud(cloudXYZ.makeShared());
+    pass.setInputCloud(in.makeShared());
     pass.setFilterFieldName("x");
     pass.setFilterLimits(x_lower_limit, x_upper_limit);
     //pass.setFilterLimitsNegative (true);
-    pass.filter (cloud_filtered);
-    pass.setInputCloud(cloud_filtered.makeShared());
+    pass.filter (path_throw_filtered_x);
+    pass.setInputCloud(path_throw_filtered_x.makeShared());
     pass.setFilterFieldName("y");
     pass.setFilterLimits(y_lower_limit, y_upper_limit);
-    pass.filter (input_cloud);
+    pass.filter (path_throw_filtered_y);
     
-//     pub2.publish(input_cloud.makeShared());
     
-    PointCloud::Ptr left(new PointCloud());
-    left->header = input_cloud.header;
-    PointCloud::Ptr right(new PointCloud());
-    right->header = input_cloud.header;
+    pcl::RadiusOutlierRemoval<pcl::PointXYZ> outrem;
+    // build the filter
+    outrem.setInputCloud(path_throw_filtered_y.makeShared());
+    outrem.setRadiusSearch(0.02);
+    outrem.setMinNeighborsInRadius (2);
+    // apply filter
+    outrem.filter (out);
     
-    const int cluster_size = 2;
+    if (out.points.size() == 0) 
+    { 
+      ROS_INFO("Point cloud has 0 points!");
+      return;
+    }
+  }
+  
+  void sortPointCloudToLeftAndRight(PointCloud& input_cloud, PointCloud::Ptr left, PointCloud::Ptr right)
+  {
     
     #if CV_MAJOR_VERSION == 2
     // do opencv 2 code
@@ -211,7 +253,7 @@ public:
       return;
     }
     
-    int leftId = 0;
+
     
     cv::Vec3f cv_center1 = centers.at<cv::Vec3f>(0);
     cv::Vec3f cv_center2 = centers.at<cv::Vec3f>(1);
@@ -220,7 +262,9 @@ public:
     // cv_center1[0],cv_center1[1] && cv_center2[0],cv_center2[1]
 
     // for example
-    leftId = cv_center1[1] > cv_center2[1];
+    // is y of the first center bigger than y of the second center?
+    int leftId = cv_center1[1] > cv_center2[1] ? 0 : 1;
+//     ROS_INFO("0: %f, 1: %f, leftId: %d", cv_center1[1], cv_center2[1], leftId);
 
     int i = 0;
     for(PointCloud::const_iterator it = input_cloud.begin(); it != input_cloud.end(); ++it, ++i)
@@ -241,17 +285,34 @@ public:
     // do opencv 3 code
     #endif
     
+  }
+  
+  std::vector<double> computeCentroids(PointCloud::Ptr cloud)
+  {
+    std::vector<double> result;
+    Eigen::Vector4f centroid;
+    pcl::compute3DCentroid (*cloud, centroid);
+    result.push_back(centroid(0));
+    result.push_back(centroid(1));
+    return result;
+  }
+  
+  std::vector<double> computeRansacModelsAngGetCenters(PointCloud::Ptr left, PointCloud::Ptr right)
+  {
+    std::vector<double> centers;
+    PointCloud toPub;
+    toPub.header = left->header;
     
-    //pub2.publish(right);
-    
-    pcl::SampleConsensusModelCircle2D<pcl::PointXYZ>::Ptr model_c_left(new pcl::SampleConsensusModelCircle2D<pcl::PointXYZ> (left));
-    pcl::SampleConsensusModelCircle2D<pcl::PointXYZ>::Ptr model_c_right(new pcl::SampleConsensusModelCircle2D<pcl::PointXYZ> (right));
+    pcl::SampleConsensusModelCircle2D<pcl::PointXYZ>::Ptr model_c_left(
+      new pcl::SampleConsensusModelCircle2D<pcl::PointXYZ> (left));
+    pcl::SampleConsensusModelCircle2D<pcl::PointXYZ>::Ptr model_c_right(
+      new pcl::SampleConsensusModelCircle2D<pcl::PointXYZ> (right));
 
     pcl::RandomSampleConsensus<pcl::PointXYZ> ransac_left (model_c_left);
     pcl::RandomSampleConsensus<pcl::PointXYZ> ransac_right (model_c_right);
 
-    ransac_left.setDistanceThreshold (.01);
-    ransac_right.setDistanceThreshold (.01);
+    ransac_left.setDistanceThreshold (ransac_dist_threshold);
+    ransac_right.setDistanceThreshold (ransac_dist_threshold);
 
     try
     {
@@ -260,31 +321,28 @@ public:
     }
     catch (...)
     {
-      ROS_ERROR("Ransac: Compute model has failed!");
-      return;
+      ROS_ERROR("Ransac: Computing model has failed!");
+      return centers;
     }
 	    
     // get the radius of the circles
 //     pcl::ModelCoefficients circle_coeff;
     Eigen::VectorXf circle_coeff;
-    
-    PointCloud toPub;
-    toPub.header = input_cloud.header;
 
     std::vector<int> samples;
     std::vector<int> inliers;
     
     ransac_left.getInliers(inliers);
+    if (inliers.size() < 3)
+    {
+      ROS_ERROR("The number of inliers is too small!");
+      return centers;
+    }
     for (int i : inliers) 
     {
       toPub.points.push_back(left->points[i]);
     }
     
-    if (inliers.size() < 3)
-    {
-      ROS_ERROR("The number of inliers is too small!");
-      return;
-    }
       
     samples.push_back(inliers[0]);
     samples.push_back(inliers[1]);
@@ -294,30 +352,34 @@ public:
 //     ransac_left.computeModelCoefficients (samples, &circle_coeff);
     ransac_left.getModelCoefficients (circle_coeff);
 //     vtkSmartPointer<vtkDataSet> data = pcl::visualization::create2DCircle (circle_coeff);
-
-    float center_x_left = circle_coeff(0);
-    float center_y_left = circle_coeff(1);
-    pub_circle(center_x_left, center_y_left, circle_coeff(2));
+    
+    centers.push_back(circle_coeff(1));
+    centers.push_back(circle_coeff(2));
+//     if (circle_coeff(2) > 0.1)
+//     {
+//       ROS_INFO("Left circle radius: %f, number of points in the left pointcloud: %d", circle_coeff(2), (int) left->points.size());
+//     }
+    pub_circle(circle_coeff(0), circle_coeff(1), 0.1, true, 0);
+    
     
     pcl::PointXYZ point;
-    point.x = center_x_left;
-    point.y = center_y_left;
+    point.x = circle_coeff(0);
+    point.y = circle_coeff(1);
     point.z = 0.0;
     toPub.points.push_back(point);
     
     
     ransac_right.getInliers(inliers);
-    for (int i : inliers) 
-    {
-      
-      toPub.points.push_back(right->points[i]);
-    }
-    
     if (inliers.size() < 3)
     {
       ROS_ERROR("The number of inliers is too small!");
-      return;
+      return centers;
     }
+    for (int i : inliers) 
+    {
+      toPub.points.push_back(right->points[i]);
+    }
+    
     
     samples.push_back(inliers[0]);
     samples.push_back(inliers[1]);
@@ -326,103 +388,156 @@ public:
     // samples must have 3 indizes
 //     ransac_right.computeModelCoefficients (samples, &circle_coeff);
     ransac_right.getModelCoefficients (circle_coeff);
+    
+    centers.push_back(circle_coeff(1));
+    centers.push_back(circle_coeff(2));
 //     vtkSmartPointer<vtkDataSet> data = pcl::visualization::create2DCircle (circle_coeff);
 
-    float center_x_right = circle_coeff(0);
-    float center_y_right = circle_coeff(1);
+//     int a;
+//     std::cin >> a;
+    pub_circle(circle_coeff(0), circle_coeff(1), 0.1, false, 1);
     
-    pub_circle(center_x_right, center_y_right, circle_coeff(2));
+//     if (circle_coeff(2) > 0.1)
+//     {
+//       ROS_INFO("x: %f, y: %f, radius: %f", circle_coeff(0), circle_coeff(1), circle_coeff(2));
+//       for (pcl::PointXYZ p : right->points) 
+//       {
+// 	ROS_INFO("Point: x = %f, y = %f", p.x, p.y);
+//       }
+      
+//       pub2.publish(right);
+//       nh_.shutdown();
+//     }
     
-    point.x = center_x_right;
-    point.y = center_y_right;
+    point.x = circle_coeff(0);
+    point.y = circle_coeff(1);
     point.z = 0.0;
     toPub.points.push_back(point);
     
     pub2.publish(toPub.makeShared());
     
+    return centers;
+  }
+  
+//     std::vector<double> data_in, data_out;
+//     // fill data_in
+//     
+//     
+//     filter->update(data_in, data_out);
+  
+  
+  void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
+  {
+    sensor_msgs::PointCloud2 cloudFromScan, tfTransformedCloud;
+    
+    laserScanToPointCloud2(scan, cloudFromScan);
+   
+    tfTransformOfPointCloud2(scan, cloudFromScan, tfTransformedCloud);
+    
+    pub.publish(tfTransformedCloud); 
+    
+    pcl::PCLPointCloud2::Ptr pcl_pc2 (new pcl::PCLPointCloud2());
+
+    pcl_conversions::toPCL (tfTransformedCloud, *pcl_pc2);
+
+    PointCloud cloudXYZ, filteredCloudXYZ;
+    pcl::fromPCLPointCloud2(*pcl_pc2, cloudXYZ);
+
+    filterPCLPointCloud(cloudXYZ, filteredCloudXYZ);
+    
+    pub2.publish(filteredCloudXYZ.makeShared());
+    
+    PointCloud::Ptr left(new PointCloud());
+    left->header = filteredCloudXYZ.header;
+    PointCloud::Ptr right(new PointCloud());
+    right->header = filteredCloudXYZ.header;
+    std::vector<double> centersOfLegsMeasurement;
+    std::vector<double> centersOfLegsKalman;
+    
+    if (circle_fitting == "ransac")
+    {
+      
+    }
+    else
+    {
+      
+    }
+    
+    sortPointCloudToLeftAndRight(filteredCloudXYZ, left, right);
+    
+    centersOfLegsMeasurement = computeRansacModelsAngGetCenters(left, right);
+    
+//     centersOfLegsMeasurement = computeCentroids(left);
+    /*
+    int numOfElements = 4;
+    if (centersOfLegsMeasurement.size() < numOfElements) { return; }*/
+    
+//     std::vector<double> v1;
+//     v1.push_back(centersOfLegsMeasurement[0]);
+//     v1.push_back(centersOfLegsMeasurement[1]);
+//     std::vector<double> v2;
+//     v1.push_back(centersOfLegsMeasurement[2]);
+//     v1.push_back(centersOfLegsMeasurement[3]);
+//     std::vector<double> v3;
+//     std::vector<double> v4;
+//     
+//     left_leg_filter->update(v1, v3);
+//     if (centersOfLegsKalman.size() < numOfElements) { return; }
+//     
+//     double radius = 0.1;
+//     pub_circle(centersOfLegsMeasurement[0], centersOfLegsMeasurement[1], radius, true, 0);
+//     pub_circle(centersOfLegsKalman[0], centersOfLegsKalman[1], radius, true, 2);
+    
+//     centersOfLegsMeasurement = computeCentroids(right);
+//     
+//     if (centersOfLegsMeasurement.size() < numOfElements) { return; }
+//     
+//     right_leg_filter->update(v2, v4);
+//     if (centersOfLegsKalman.size() < numOfElements) { return; }
+    
+//     pub_circle(centersOfLegsMeasurement[2], centersOfLegsMeasurement[3], radius, true, 1);
+//     pub_circle(centersOfLegsKalman[0], centersOfLegsKalman[1], radius, true, 3);
     
   }
   
-  void pub_circle(float x, float y, float radius)
+  void pub_circle(double x, double y, double radius, bool isLeft, int id)
   {
     visualization_msgs::Marker marker;
     marker.header.frame_id = transform_link;
     marker.header.stamp = ros::Time();
     marker.ns = nh_.getNamespace();
-    marker.id = 0;
+    marker.id = id;
     marker.type = visualization_msgs::Marker::CYLINDER;
     marker.action = visualization_msgs::Marker::ADD;
     marker.pose.position.x = x;
     marker.pose.position.y = y;
-    marker.pose.position.z = 0;
-    marker.pose.orientation.x = 0.0;
-    marker.pose.orientation.y = 0.0;
-    marker.pose.orientation.z = 0.0;
-    marker.pose.orientation.w = 1.0;
+//     marker.pose.position.z = 0;
+//     marker.pose.orientation.x = 0.0;
+//     marker.pose.orientation.y = 0.0;
+//     marker.pose.orientation.z = 0.0;
+//     marker.pose.orientation.w = 1.0;
     marker.scale.x = radius;
     marker.scale.y = radius;
-    marker.scale.z = 0;
+//     marker.scale.z = 0;
     marker.color.a = 1.0; // Don't forget to set the alpha!
-    marker.color.r = 0.0;
-    marker.color.g = 1.0;
-    marker.color.b = 0.0;
+    if (isLeft) 
+    { 
+      marker.color.r = 1.0; 
+      if (id == 2) { marker.color.b = 1.0; }
+//       marker.color.g = 0.0;
+    }
+    else 
+    { 
+//       marker.color.r = 0.0; 
+      marker.color.g = 1.0;
+      if (id == 3) { marker.color.b = 1.0; }
+    }
+//     marker.color.b = 0.0;
     //only if using a MESH_RESOURCE marker type:
-    marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
+//     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
     vis_pub.publish( marker );
 
   }
-  
-  
-
-// /* 
-//  *  update Kalman filter model
-//  */
-// ...
-// 
-// 
-// 
-// 
-// 
-// 
-// pcl::PointCloud<pcl::PointXYZ>::Ptr MatToPoinXYZ(cv::Mat OpencVPointCloud)
-//  {
-// 	 /*
-// 	 *  Function: Get from a Mat to pcl pointcloud datatype
-// 	 *  In: cv::Mat
-// 	 *  Out: pcl::PointCloud
-// 	 */
-// 
-// 	 //char pr=100, pg=100, pb=100;
-// 	 pcl::PointCloud<pcl::PointXYZ>::Ptr point_cloud_ptr(new pcl::PointCloud<pcl::PointXYZ>);//(new pcl::pointcloud<pcl::pointXYZ>);
-// 
-// 	 for(int i=0;i<OpencVPointCloud.cols;i++)
-// 	 {
-// 		//std::cout<<i<<endl;
-// 
-// 		pcl::PointXYZ point;
-// 		point.x = OpencVPointCloud.at<float>(0,i);
-// 		point.y = OpencVPointCloud.at<float>(1,i);
-// 		point.z = OpencVPointCloud.at<float>(2,i);
-// 
-// 		// when color needs to be added:
-// 		//uint32_t rgb = (static_cast<uint32_t>(pr) << 16 | static_cast<uint32_t>(pg) << 8 | static_cast<uint32_t>(pb));
-// 		//point.rgb = *reinterpret_cast<float*>(&rgb);
-// 
-// 		point_cloud_ptr -> points.push_back(point);
-// 
-// 
-// 	 }
-// 	 point_cloud_ptr->width = (int)point_cloud_ptr->points.size();
-// 	 point_cloud_ptr->height = 1;
-// 
-// 	 return point_cloud_ptr;
-// 
-//  }
-//   
-//   
-//   
-//   
-  
   
 };
 

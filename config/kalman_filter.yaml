@@ -1,0 +1,4 @@
+Kalman:
+  name: kalman_filter
+  type: KalmanFilterVectorDouble
+  params: {number_of_elements_: 5}
