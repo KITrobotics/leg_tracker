@@ -1,5 +1,5 @@
 <package format="2">
-    <name>cob_leg_tracker</name>
+    <name>leg_tracker</name>
     <version>0.0.0</version>
     <description>Leg Detector to find leg-like patterns of laser scanner readings.</description>
     <maintainer email="unduh@todo.todo">unduh</maintainer>
@@ -21,13 +21,14 @@
     <depend>tf2</depend>
     <depend>tf2_ros</depend>
     <depend>rosconsole</depend>
-    <depend>pluginlib</depend>
+<!--     <depend>pluginlib</depend> -->
+    <depend>iirob_filters</depend>
     
 
     
-    <export>
-      <cob_leg_tracker plugin="${prefix}/kalman_filter_plugin.xml" />
-    </export>
+    <!--<export>
+      <leg_tracker plugin="${prefix}/kalman_filter_plugin.xml" />
+    </export>-->
     
     
 <!--     <depend>cv_bridge</depend> -->

@@ -6,3 +6,4 @@ y_lower_limit: -1.0
 y_upper_limit: 1.0
 ransac_dist_threshold: 0.01
 circle_fitting: centroid # ransac or centroid
+circle_radius: 0.1

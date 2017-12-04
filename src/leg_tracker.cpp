@@ -29,10 +29,10 @@
 #include <visualization_msgs/Marker.h>
 #include <pcl/filters/radius_outlier_removal.h>
 #include <iostream>
-#include "kalman_filter.h"
+#include <iirob_filters/kalman_filter.h>
 #include <pcl/common/centroid.h>
-
-
+#include <iirob_filters/KalmanFilterParameters.h>
+#include <std_msgs/Float64MultiArray.h>
 
 
 
@@ -56,8 +56,10 @@ class LegDetector
 private:
   ros::Subscriber sub;
   laser_geometry::LaserProjection projector_;
-  ros::Publisher pub;
-  ros::Publisher pub2;
+  ros::Publisher sensor_msgs_point_cloud_publisher;
+  ros::Publisher pcl_cloud_publisher;
+  ros::Publisher pos_vel_acc_lleg_pub;
+  ros::Publisher pos_vel_acc_rleg_pub;
   std::string transform_link;
   std::string scan_topic;
   double x_lower_limit;
@@ -69,14 +71,19 @@ private:
   ros::Publisher vis_pub;
   double ransac_dist_threshold;
   std::string circle_fitting;
+  double circle_radius;
+  std::vector<double> centerOfLegLastMeasurement;
+  
+//   iirob_filters::KalmanFilterParameters params_;
 
   // Construct the filter
-  filters::MultiChannelFilterBase<double>* left_leg_filter;
-  filters::MultiChannelFilterBase<double>* right_leg_filter;
+  iirob_filters::MultiChannelKalmanFilter<double>* left_leg_filter;
+  iirob_filters::MultiChannelKalmanFilter<double>* right_leg_filter;
 
 public:
   ros::NodeHandle nh_;
-  LegDetector(ros::NodeHandle nh) : nh_(nh), tfListener(tfBuffer)
+  LegDetector(ros::NodeHandle nh) : nh_(nh), /*params_{std::string(nh_.getNamespace() + "/KalmanFilter")}, */
+      tfListener(tfBuffer)
   {
     nh_.param("scan_topic", scan_topic, std::string("/base_laser_rear/scan"));
     nh_.param("transform_link", transform_link, std::string("base_link"));
@@ -86,14 +93,16 @@ public:
     nh_.param("y_upper_limit", y_upper_limit, 0.5);
     nh_.param("ransac_dist_threshold", ransac_dist_threshold, 0.1);
     nh_.param("circle_fitting", circle_fitting, std::string("centroid"));
+    nh_.param("circle_radius", circle_radius, 0.1);
     
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 10, &LegDetector::processLaserScan, this);
-    pub = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 10);
-    pub2 = nh_.advertise<PointCloud> ("scan2pclCloud", 100);
+    sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 10);
+    pcl_cloud_publisher = nh_.advertise<PointCloud> ("scan2pclCloud", 100);
     vis_pub = nh_.advertise<visualization_msgs::Marker>("leg_circles", 0);
-    
+    pos_vel_acc_lleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_lleg", 10);
+    pos_vel_acc_rleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_rleg", 10);
       
-
+/*
     int n = 6; // Number of states
     int m = 2; // Number of measurements
 
@@ -141,11 +150,11 @@ public:
     
     Eigen::VectorXd x0(n);
     x0 << 0, 0, 0;
-    
-    left_leg_filter = new filters::KalmanFilter<double>(0.0, A, C, Q, R, P, x0);
-    left_leg_filter->configure();
-    right_leg_filter = new filters::KalmanFilter<double>(0.0, A, C, Q, R, P, x0);
-    right_leg_filter->configure();
+    */
+    left_leg_filter = new iirob_filters::MultiChannelKalmanFilter<double>();
+    if (!left_leg_filter->configure()) { ROS_ERROR("Configure of filter has failed!"); nh_.shutdown(); }
+    right_leg_filter = new iirob_filters::MultiChannelKalmanFilter<double>();
+    if (!right_leg_filter->configure()) { ROS_ERROR("Configure of filter has failed!"); nh_.shutdown(); }
   }
   ~LegDetector() {}
   
@@ -158,6 +167,7 @@ public:
   
   void laserScanToPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, sensor_msgs::PointCloud2& cloud)
   {
+    if (!scan) { ROS_ERROR("Laser scan pointer was not set!"); }
     projector_.projectLaser(*scan, cloud);
   }
   
@@ -176,8 +186,14 @@ public:
     tf2::doTransform(from, to, transformStamped);
   }
   
-  void filterPCLPointCloud(PointCloud& in, PointCloud& out)
+  bool filterPCLPointCloud(const PointCloud& in, PointCloud& out)
   {
+    if (in.points.size() < 5) 
+    { 
+      ROS_ERROR("Filtering: Too small number of points in the input PointCloud!"); 
+      return false; 
+    }
+    
     PointCloud path_throw_filtered_x;
     PointCloud path_throw_filtered_y;
     PointCloud sor_filtered;
@@ -202,17 +218,18 @@ public:
     // apply filter
     outrem.filter (out);
     
-    if (out.points.size() == 0) 
+    if (out.points.size() < 5) 
     { 
-      ROS_INFO("Point cloud has 0 points!");
-      return;
+      ROS_ERROR("Filtering: Too small number of points in the resulting PointCloud!"); 
+      return false; 
     }
+    return true;
   }
   
-  void sortPointCloudToLeftAndRight(PointCloud& input_cloud, PointCloud::Ptr left, PointCloud::Ptr right)
+  void sortPointCloudToLeftAndRight(const PointCloud& input_cloud, PointCloud::Ptr left, PointCloud::Ptr right)
   {
     
-    #if CV_MAJOR_VERSION == 2
+//     #if CV_MAJOR_VERSION == 2
     // do opencv 2 code
 
     
@@ -235,7 +252,6 @@ public:
 
     int attempts = 10;
     cv::Mat centers;
-    // bool success = false;
 
     int max_cluster_size = input_cloud.size() > cluster_size ? cluster_size : input_cloud.size(); 
     
@@ -243,16 +259,12 @@ public:
     cv::kmeans(points, max_cluster_size, labels, 
 	    cv::TermCriteria(CV_TERMCRIT_ITER|CV_TERMCRIT_EPS, 10e4, 1e-4),
 	    attempts, cv::KMEANS_RANDOM_CENTERS, centers);
-
-    // std::cerr << "Kmeans size: " << centers.size() << std::endl;
-    // success = centers.rows > 0;
     
     if (centers.rows != 2)
     {
       ROS_ERROR("KMeans: The number of rows is not valid!");
       return;
     }
-    
 
     
     cv::Vec3f cv_center1 = centers.at<cv::Vec3f>(0);
@@ -269,22 +281,20 @@ public:
     int i = 0;
     for(PointCloud::const_iterator it = input_cloud.begin(); it != input_cloud.end(); ++it, ++i)
     {
-	    int id = labels.at<int>(i,0);
-	    if (id == leftId) 
-	    {
-		    left->points.push_back(*it);
-	    }
-	    else
-	    {
-		    right->points.push_back(*it);
-	    }
+      int id = labels.at<int>(i,0);
+      if (id == leftId) 
+      {
+	left->points.push_back(*it);
+      }
+      else
+      {
+	right->points.push_back(*it);
+      }
     }
     
-    
-    #elif CV_MAJOR_VERSION == 3
+//     #elif CV_MAJOR_VERSION == 3
     // do opencv 3 code
-    #endif
-    
+//     #endif
   }
   
   std::vector<double> computeCentroids(PointCloud::Ptr cloud)
@@ -297,27 +307,22 @@ public:
     return result;
   }
   
-  std::vector<double> computeRansacModelsAngGetCenters(PointCloud::Ptr left, PointCloud::Ptr right)
+  std::vector<double> computeRansacPubInliersAndGetCenters(PointCloud::Ptr cloud)
   {
     std::vector<double> centers;
     PointCloud toPub;
-    toPub.header = left->header;
+    toPub.header = cloud->header;
     
-    pcl::SampleConsensusModelCircle2D<pcl::PointXYZ>::Ptr model_c_left(
-      new pcl::SampleConsensusModelCircle2D<pcl::PointXYZ> (left));
-    pcl::SampleConsensusModelCircle2D<pcl::PointXYZ>::Ptr model_c_right(
-      new pcl::SampleConsensusModelCircle2D<pcl::PointXYZ> (right));
+    pcl::SampleConsensusModelCircle2D<pcl::PointXYZ>::Ptr model(
+      new pcl::SampleConsensusModelCircle2D<pcl::PointXYZ> (cloud));
 
-    pcl::RandomSampleConsensus<pcl::PointXYZ> ransac_left (model_c_left);
-    pcl::RandomSampleConsensus<pcl::PointXYZ> ransac_right (model_c_right);
+    pcl::RandomSampleConsensus<pcl::PointXYZ> ransac (model);
 
-    ransac_left.setDistanceThreshold (ransac_dist_threshold);
-    ransac_right.setDistanceThreshold (ransac_dist_threshold);
+    ransac.setDistanceThreshold (ransac_dist_threshold);
 
     try
     {
-      ransac_left.computeModel();
-      ransac_right.computeModel();
+      ransac.computeModel();
     }
     catch (...)
     {
@@ -325,41 +330,27 @@ public:
       return centers;
     }
 	    
-    // get the radius of the circles
-//     pcl::ModelCoefficients circle_coeff;
+    /*
+     * get the radius of the circles
+     */ 
     Eigen::VectorXf circle_coeff;
 
-    std::vector<int> samples;
     std::vector<int> inliers;
-    
-    ransac_left.getInliers(inliers);
+    ransac.getInliers(inliers);
     if (inliers.size() < 3)
     {
       ROS_ERROR("The number of inliers is too small!");
       return centers;
     }
+    
     for (int i : inliers) 
     {
-      toPub.points.push_back(left->points[i]);
+      toPub.points.push_back(cloud->points[i]);
     }
-    
-      
-    samples.push_back(inliers[0]);
-    samples.push_back(inliers[1]);
-    samples.push_back(inliers[2]);
-
-    // samples must have 3 indizes
-//     ransac_left.computeModelCoefficients (samples, &circle_coeff);
-    ransac_left.getModelCoefficients (circle_coeff);
-//     vtkSmartPointer<vtkDataSet> data = pcl::visualization::create2DCircle (circle_coeff);
+    ransac.getModelCoefficients(circle_coeff);
     
     centers.push_back(circle_coeff(1));
     centers.push_back(circle_coeff(2));
-//     if (circle_coeff(2) > 0.1)
-//     {
-//       ROS_INFO("Left circle radius: %f, number of points in the left pointcloud: %d", circle_coeff(2), (int) left->points.size());
-//     }
-    pub_circle(circle_coeff(0), circle_coeff(1), 0.1, true, 0);
     
     
     pcl::PointXYZ point;
@@ -368,63 +359,164 @@ public:
     point.z = 0.0;
     toPub.points.push_back(point);
     
-    
-    ransac_right.getInliers(inliers);
-    if (inliers.size() < 3)
-    {
-      ROS_ERROR("The number of inliers is too small!");
-      return centers;
-    }
-    for (int i : inliers) 
-    {
-      toPub.points.push_back(right->points[i]);
-    }
-    
-    
-    samples.push_back(inliers[0]);
-    samples.push_back(inliers[1]);
-    samples.push_back(inliers[2]);
-
-    // samples must have 3 indizes
-//     ransac_right.computeModelCoefficients (samples, &circle_coeff);
-    ransac_right.getModelCoefficients (circle_coeff);
-    
-    centers.push_back(circle_coeff(1));
-    centers.push_back(circle_coeff(2));
-//     vtkSmartPointer<vtkDataSet> data = pcl::visualization::create2DCircle (circle_coeff);
-
-//     int a;
-//     std::cin >> a;
-    pub_circle(circle_coeff(0), circle_coeff(1), 0.1, false, 1);
-    
-//     if (circle_coeff(2) > 0.1)
-//     {
-//       ROS_INFO("x: %f, y: %f, radius: %f", circle_coeff(0), circle_coeff(1), circle_coeff(2));
-//       for (pcl::PointXYZ p : right->points) 
-//       {
-// 	ROS_INFO("Point: x = %f, y = %f", p.x, p.y);
-//       }
-      
-//       pub2.publish(right);
-//       nh_.shutdown();
-//     }
-    
-    point.x = circle_coeff(0);
-    point.y = circle_coeff(1);
-    point.z = 0.0;
-    toPub.points.push_back(point);
-    
-    pub2.publish(toPub.makeShared());
+    pcl_cloud_publisher.publish(toPub.makeShared());
     
     return centers;
   }
   
-//     std::vector<double> data_in, data_out;
-//     // fill data_in
-//     
-//     
-//     filter->update(data_in, data_out);
+  void pub_leg_posvelacc(std::vector<double>& in, bool isLeft)
+  {
+    std_msgs::Float64MultiArray msg;
+
+    // set up dimensions
+    msg.layout.dim.push_back(std_msgs::MultiArrayDimension());
+    msg.layout.dim[0].size = in.size();
+    msg.layout.dim[0].stride = 1;
+    msg.layout.dim[0].label = "pos_vel_acc"; 
+
+    // copy in the data
+    msg.data.clear();
+    msg.data.insert(msg.data.end(), in.begin(), in.end());
+    
+    if (isLeft) { pos_vel_acc_lleg_pub.publish(msg); }
+    else { pos_vel_acc_rleg_pub.publish(msg); }
+  }
   
+  bool useKalmanFilterAndPubCircles(const PointCloud::Ptr cloud, bool isLeft)
+  {
+    const int num_elements_measurement = 2;
+    const int num_elements_kalman = 6;
+    std::vector<double> centerOfLegMeasurement;
+    std::vector<double> centerOfLegKalman;
+//     if (circle_fitting == "ransac")
+//     {
+//       centerOfLegMeasurement = computeRansacPubInliersAndGetCenters(cloud);
+//     }
+//     else
+//     {
+//       centerOfLegMeasurement = computeCentroids(cloud);
+//     }
+    if (!computeCenterOfLeg(cloud, centerOfLegMeasurement)) { return false; }
+    
+    if (centerOfLegMeasurement.size() < num_elements_measurement) 
+    { 
+      ROS_ERROR("Center (measurement) does not have enough elements!"); 
+      return false; 
+    }
+    
+//     if (abs(centerOfLegMeasurement[0] - centerOfLegLastMeasurement[0]) > ...)
+//     {
+//       
+//     }
+    
+    if (isLeft) { left_leg_filter->update(centerOfLegMeasurement, centerOfLegKalman); }
+    else { right_leg_filter->update(centerOfLegMeasurement, centerOfLegKalman); }
+    
+    pub_circle(centerOfLegMeasurement[0], centerOfLegMeasurement[1], circle_radius, isLeft, isLeft ? 0 : 1);
+    
+    if (centerOfLegKalman.size() < num_elements_kalman) 
+    { 
+      ROS_ERROR("Centers (kalman) do not have enough elements!"); 
+      return false; 
+    }
+    
+    pub_circle(centerOfLegKalman[0], centerOfLegKalman[1], circle_radius, isLeft, isLeft ? 2 : 3);
+    
+    pub_leg_posvelacc(centerOfLegKalman, isLeft);
+    
+    return true;
+  }
+  
+  bool computeCenterOfLeg(const PointCloud::Ptr cloud, std::vector<double>& center)
+  {
+    int min_points = 4;
+    int num_points = cloud->points.size();
+    if (num_points < min_points) { ROS_ERROR("Circularity and Linerity: Too small number of points!"); return false; }
+    double x_mean, y_mean;
+    CvMat* A = cvCreateMat(num_points, 3, CV_64FC1);
+    CvMat* B = cvCreateMat(num_points, 1, CV_64FC1);
+    
+//     CvMat* points = cvCreateMat(num_points, 2, CV_64FC1);
+    
+    int j = 0;
+    for (pcl::PointXYZ p : cloud->points)
+    {
+      x_mean += p.x / num_points;
+      y_mean += p.y / num_points;
+      
+//       cvmSet(points, j, 0, p.x - x_mean);
+//       cvmSet(points, j, 1, p.y - y_mean);
+      
+      cvmSet(A, j, 0, -2.0 * p.x);
+      cvmSet(A, j, 1, -2.0 * p.y);
+      cvmSet(A, j, 2, 1);
+
+      cvmSet(B, j, 0, -pow(p.x, 2) - pow(p.y, 2));
+      j++;
+    }
+
+//     CvMat* W = cvCreateMat(2, 2, CV_64FC1);
+//     CvMat* U = cvCreateMat(num_points, 2, CV_64FC1);
+//     CvMat* V = cvCreateMat(2, 2, CV_64FC1);
+//     cvSVD(points, W, U, V);
+// 
+//     CvMat* rot_points = cvCreateMat(num_points, 2, CV_64FC1);
+//     cvMatMul(U, W, rot_points);
+// 
+//     // Compute Linearity
+//     double linearity = 0.0;
+//     for (int i = 0; i < num_points; i++)
+//     {
+//       linearity += pow(cvmGet(rot_points, i, 1), 2);
+//     }
+// 
+//     cvReleaseMat(&points);
+//     points = 0;
+//     cvReleaseMat(&W);
+//     W = 0;
+//     cvReleaseMat(&U);
+//     U = 0;
+//     cvReleaseMat(&V);
+//     V = 0;
+//     cvReleaseMat(&rot_points);
+//     rot_points = 0;
+    
+    
+
+    // Compute Circularity
+ 
+    CvMat* sol = cvCreateMat(3, 1, CV_64FC1);
+
+    cvSolve(A, B, sol, CV_SVD);
+
+    double xc = cvmGet(sol, 0, 0);
+    double yc = cvmGet(sol, 1, 0);
+    double rc = sqrt(pow(xc, 2) + pow(yc, 2) - cvmGet(sol, 2, 0));
+    
+    center.clear();
+    center.push_back(xc);
+    center.push_back(yc);
+    
+    return true;
+    
+//     pub_circle(xc, yc, rc, isLeft, isLeft ? 0 : 1);
+
+//     cvReleaseMat(&A);
+//     A = 0;
+//     cvReleaseMat(&B);
+//     B = 0;
+//     cvReleaseMat(&sol);
+//     sol = 0;
+// 
+//     float circularity = 0.0;
+//     for (SampleSet::iterator i = cluster->begin();
+// 	i != cluster->end();
+// 	i++)
+//     {
+//       circularity += pow(rc - sqrt(pow(xc - (*i)->x, 2) + pow(yc - (*i)->y, 2)), 2);
+//     }
+
+  }
   
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
@@ -434,69 +526,33 @@ public:
    
     tfTransformOfPointCloud2(scan, cloudFromScan, tfTransformedCloud);
     
-    pub.publish(tfTransformedCloud); 
+    sensor_msgs_point_cloud_publisher.publish(tfTransformedCloud); 
     
     pcl::PCLPointCloud2::Ptr pcl_pc2 (new pcl::PCLPointCloud2());
 
-    pcl_conversions::toPCL (tfTransformedCloud, *pcl_pc2);
+    pcl_conversions::toPCL(tfTransformedCloud, *pcl_pc2);
 
     PointCloud cloudXYZ, filteredCloudXYZ;
     pcl::fromPCLPointCloud2(*pcl_pc2, cloudXYZ);
 
-    filterPCLPointCloud(cloudXYZ, filteredCloudXYZ);
+    if (!filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { return; }
     
-    pub2.publish(filteredCloudXYZ.makeShared());
+    pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
     
     PointCloud::Ptr left(new PointCloud());
     left->header = filteredCloudXYZ.header;
+    
     PointCloud::Ptr right(new PointCloud());
     right->header = filteredCloudXYZ.header;
-    std::vector<double> centersOfLegsMeasurement;
-    std::vector<double> centersOfLegsKalman;
-    
-    if (circle_fitting == "ransac")
-    {
-      
-    }
-    else
-    {
-      
-    }
     
     sortPointCloudToLeftAndRight(filteredCloudXYZ, left, right);
     
-    centersOfLegsMeasurement = computeRansacModelsAngGetCenters(left, right);
+//     pubCircularityAndLinearity(left, true);
+//     pubCircularityAndLinearity(right, false);
     
-//     centersOfLegsMeasurement = computeCentroids(left);
-    /*
-    int numOfElements = 4;
-    if (centersOfLegsMeasurement.size() < numOfElements) { return; }*/
+    if (!useKalmanFilterAndPubCircles(left, true)) { return; }
+    if (!useKalmanFilterAndPubCircles(right, false)) { return; }
     
-//     std::vector<double> v1;
-//     v1.push_back(centersOfLegsMeasurement[0]);
-//     v1.push_back(centersOfLegsMeasurement[1]);
-//     std::vector<double> v2;
-//     v1.push_back(centersOfLegsMeasurement[2]);
-//     v1.push_back(centersOfLegsMeasurement[3]);
-//     std::vector<double> v3;
-//     std::vector<double> v4;
-//     
-//     left_leg_filter->update(v1, v3);
-//     if (centersOfLegsKalman.size() < numOfElements) { return; }
-//     
-//     double radius = 0.1;
-//     pub_circle(centersOfLegsMeasurement[0], centersOfLegsMeasurement[1], radius, true, 0);
-//     pub_circle(centersOfLegsKalman[0], centersOfLegsKalman[1], radius, true, 2);
-    
-//     centersOfLegsMeasurement = computeCentroids(right);
-//     
-//     if (centersOfLegsMeasurement.size() < numOfElements) { return; }
-//     
-//     right_leg_filter->update(v2, v4);
-//     if (centersOfLegsKalman.size() < numOfElements) { return; }
-    
-//     pub_circle(centersOfLegsMeasurement[2], centersOfLegsMeasurement[3], radius, true, 1);
-//     pub_circle(centersOfLegsKalman[0], centersOfLegsKalman[1], radius, true, 3);
     
   }
   
@@ -541,16 +597,34 @@ public:
   
 };
 
+  filters::MultiChannelFilterBase<double>* f;
 
 int main(int argc, char **argv)
 {
-	ros::init(argc, argv,"leg_detection");
-	ros::NodeHandle nh("~");
-	LegDetector ld(nh);
-	
-
-	ROS_INFO("Execute main");
-	ros::spin();
-
-	return 0;
+  ros::init(argc, argv,"leg_tracker");
+  ros::NodeHandle nh("~");
+  
+  LegDetector ld(nh);
+  ros::spin();
+  
+//     f = new iirob_filters::MultiChannelKalmanFilter<double>();
+//     f->configure();
+//     
+//     for (int i = 0; i < 100; ++i)
+//     {
+//       
+//     std::vector<double> v, out;
+//     v.push_back(i);
+//     v.push_back(i + 1);
+//     
+//     ROS_INFO("IN: %f, %f", v[0], v[1]);
+//     
+//     
+//     f->update(v, out);
+//       
+//     ROS_INFO("OUT: %f, %f", out[0], out[1]);
+//       
+//       
+//     }
+  return 0;
 }

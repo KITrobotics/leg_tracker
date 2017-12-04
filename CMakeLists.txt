@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(cob_leg_tracker)
+project(leg_tracker)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++11)
@@ -29,6 +29,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_ros
   tf2_msgs
   tf2_sensor_msgs
+  iirob_filters
 #   trajectory_msgs 
 #   urdf
 )
@@ -39,13 +40,13 @@ find_package(Boost REQUIRED)
 
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES kalman
+#   LIBRARIES kalman
   CATKIN_DEPENDS std_msgs
   DEPENDS Eigen3
 )
 
-add_library(kalman src/kalman_filter.cpp)
-target_link_libraries(kalman ${catkin_LIBRARIES} ${Boost_LIBRARIES})
+# add_library(kalman src/kalman_filter.cpp)
+# target_link_libraries(kalman ${catkin_LIBRARIES} ${Boost_LIBRARIES})
 
 include_directories(
   include 
@@ -56,12 +57,12 @@ include_directories(
   )
 # include_directories(include ${Boost_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS})
 
-add_executable(${PROJECT_NAME} src/cob_leg_tracker.cpp)
+add_executable(${PROJECT_NAME} src/leg_tracker.cpp)
 # set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS "-DOSNAME_LINUX -DWITH_ESD_CAN")
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(
   ${PROJECT_NAME} 
-  kalman 
+#   kalman 
   ${Boost_INCLUDE_DIRS} 
   ${Eigen_LIBRARIES}
   ${catkin_LIBRARIES} 
@@ -80,4 +81,4 @@ install(TARGETS ${PROJECT_NAME}
 # install(FILES ${PROJECT_SOURCE_DIR}/common/lib/${MYARCH}/libSDHLibrary-CPP.so DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
 
 ### LINT ###
-roslint_cpp(src/cob_leg_tracker.cpp)
+roslint_cpp(src/leg_tracker.cpp)
