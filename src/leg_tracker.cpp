@@ -33,6 +33,8 @@
 #include <pcl/common/centroid.h>
 #include <iirob_filters/KalmanFilterParameters.h>
 #include <std_msgs/Float64MultiArray.h>
+#include <pcl/kdtree/kdtree.h>
+#include <pcl/segmentation/extract_clusters.h>
 
 
 
@@ -73,6 +75,10 @@ private:
   std::string circle_fitting;
   double circle_radius;
   std::vector<double> centerOfLegLastMeasurement;
+  pcl::PointXYZ person_center;
+  cv::Point2f left_leg_prediction;
+  cv::Point2f right_leg_prediction;
+  int legs_gathered;
   
 //   iirob_filters::KalmanFilterParameters params_;
 
@@ -94,6 +100,8 @@ public:
     nh_.param("ransac_dist_threshold", ransac_dist_threshold, 0.1);
     nh_.param("circle_fitting", circle_fitting, std::string("centroid"));
     nh_.param("circle_radius", circle_radius, 0.1);
+    
+    legs_gathered = 0;
     
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 10, &LegDetector::processLaserScan, this);
     sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 10);
@@ -226,6 +234,52 @@ public:
     return true;
   }
   
+  void clustering(const PointCloud& cloud)
+  {
+    
+    if (cloud.points.size() < 4) { return; }
+//     pcl::PCDWriter writer;
+
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
+    tree->setInputCloud (cloud.makeShared());
+    std::vector<pcl::PointIndices> cluster_indices;
+    pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
+    ec.setClusterTolerance (0.04); // 4cm
+    ec.setMinClusterSize (4);
+    ec.setMaxClusterSize (100);
+    ec.setSearchMethod (tree);
+    ec.setInputCloud (cloud.makeShared());
+    ec.extract (cluster_indices);
+    
+    int j = 0;
+    for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
+    {
+      pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cluster (new pcl::PointCloud<pcl::PointXYZ>);
+      cloud_cluster->header = cloud.header;
+      for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit)
+	cloud_cluster->points.push_back (cloud.points[*pit]); //*
+      cloud_cluster->width = cloud_cluster->points.size ();
+      cloud_cluster->height = 1;
+      cloud_cluster->is_dense = true;
+      
+
+//       std::cout << "PointCloud representing the Cluster: " << cloud_cluster->points.size () << " data points." << std::endl;
+      
+      
+      std::vector<double> c = computeCentroids(cloud_cluster);
+      if (c.size() == 2)
+	pub_circle_with_id(c[0], c[1], j);
+//       std::stringstream ss;
+//       ss << "cloud_cluster_" << j << ".pcd";
+//       writer.write<pcl::PointXYZ> (ss.str (), *cloud_cluster, false); //*
+      j++;
+    }
+      pcl_cloud_publisher.publish(cloud.makeShared());
+
+    std::cout << "clusters: " << j << " datas." << std::endl;	
+
+  }
+  
   void sortPointCloudToLeftAndRight(const PointCloud& input_cloud, PointCloud::Ptr left, PointCloud::Ptr right)
   {
     
@@ -270,12 +324,20 @@ public:
     cv::Vec3f cv_center1 = centers.at<cv::Vec3f>(0);
     cv::Vec3f cv_center2 = centers.at<cv::Vec3f>(1);
     
+    cv::Point2f c1(cv_center1[0], cv_center1[1]);
+    cv::Point2f c2(cv_center2[0], cv_center2[1]);
+  
+    double dist_to_center1 = cv::norm(left_leg_prediction - c1);
+    double dist_to_center2 = cv::norm(left_leg_prediction - c2);
+    
+    int leftId = dist_to_center1 < dist_to_center2 ? 0 : 1;
+    
     // compare two centers 
     // cv_center1[0],cv_center1[1] && cv_center2[0],cv_center2[1]
 
     // for example
     // is y of the first center bigger than y of the second center?
-    int leftId = cv_center1[1] > cv_center2[1] ? 0 : 1;
+//     int leftId = cv_center1[1] > cv_center2[1] ? 0 : 1;
 //     ROS_INFO("0: %f, 1: %f, leftId: %d", cv_center1[1], cv_center2[1], leftId);
 
     int i = 0;
@@ -366,6 +428,8 @@ public:
   
   void pub_leg_posvelacc(std::vector<double>& in, bool isLeft)
   {
+    if (in.size() != 6) { ROS_ERROR("Invalid vector of leg posvelacc!"); return; }
+    
     std_msgs::Float64MultiArray msg;
 
     // set up dimensions
@@ -408,11 +472,17 @@ public:
 //     {
 //       
 //     }
+    std::vector<double> prediction;
+    if (isLeft) { left_leg_filter->predict(prediction); left_leg_prediction = cv::Point2f(prediction[0], prediction[1]); }
+    else { right_leg_filter->predict(prediction); right_leg_prediction = cv::Point2f(prediction[0], prediction[1]); }
+    pub_circle(prediction[0], prediction[1], circle_radius, isLeft, isLeft ? 2 : 3);
     
     if (isLeft) { left_leg_filter->update(centerOfLegMeasurement, centerOfLegKalman); }
     else { right_leg_filter->update(centerOfLegMeasurement, centerOfLegKalman); }
     
-    pub_circle(centerOfLegMeasurement[0], centerOfLegMeasurement[1], circle_radius, isLeft, isLeft ? 0 : 1);
+//     pub_circle(centerOfLegMeasurement[0], centerOfLegMeasurement[1], circle_radius, isLeft, isLeft ? 0 : 1);
+
+    
     
     if (centerOfLegKalman.size() < num_elements_kalman) 
     { 
@@ -420,7 +490,19 @@ public:
       return false; 
     }
     
-    pub_circle(centerOfLegKalman[0], centerOfLegKalman[1], circle_radius, isLeft, isLeft ? 2 : 3);
+//     pub_circle(centerOfLegKalman[0], centerOfLegKalman[1], circle_radius, isLeft, isLeft ? 2 : 3);
+    if (legs_gathered == 1) {
+      person_center.x = (person_center.x + centerOfLegKalman[0]) / 2;
+      person_center.y = (person_center.y + centerOfLegKalman[1]) / 2;
+      legs_gathered++;
+    } else {
+      if (legs_gathered == 2) {
+	pub_circle(person_center.x, person_center.y, 0.7, isLeft, 0);
+      } 
+      person_center.x = centerOfLegKalman[0];
+      person_center.y = centerOfLegKalman[1];
+      legs_gathered = 1;
+    }  
     
     pub_leg_posvelacc(centerOfLegKalman, isLeft);
     
@@ -537,23 +619,57 @@ public:
 
     if (!filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { return; }
     
-    pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
+    clustering(filteredCloudXYZ);
     
-    PointCloud::Ptr left(new PointCloud());
-    left->header = filteredCloudXYZ.header;
+//     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
     
-    PointCloud::Ptr right(new PointCloud());
-    right->header = filteredCloudXYZ.header;
+//     PointCloud::Ptr left(new PointCloud());
+//     left->header = filteredCloudXYZ.header;
+//     
+//     PointCloud::Ptr right(new PointCloud());
+//     right->header = filteredCloudXYZ.header;
+//     
+//     sortPointCloudToLeftAndRight(filteredCloudXYZ, left, right);
+//     
+// //     pubCircularityAndLinearity(left, true);
+// //     pubCircularityAndLinearity(right, false);
+//     
+//     if (!useKalmanFilterAndPubCircles(left, true)) { return; }
+//     if (!useKalmanFilterAndPubCircles(right, false)) { return; }
     
-    sortPointCloudToLeftAndRight(filteredCloudXYZ, left, right);
     
-//     pubCircularityAndLinearity(left, true);
-//     pubCircularityAndLinearity(right, false);
-    
-    if (!useKalmanFilterAndPubCircles(left, true)) { return; }
-    if (!useKalmanFilterAndPubCircles(right, false)) { return; }
-    
-    
+  }
+  
+  void pub_circle_with_id(double x, double y, int id)
+  {
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = transform_link;
+    marker.header.stamp = ros::Time();
+    marker.ns = nh_.getNamespace();
+    marker.id = id;
+    marker.type = visualization_msgs::Marker::CYLINDER;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.position.x = x;
+    marker.pose.position.y = y;
+//     marker.pose.position.z = 0;
+//     marker.pose.orientation.x = 0.0;
+//     marker.pose.orientation.y = 0.0;
+//     marker.pose.orientation.z = 0.0;
+//     marker.pose.orientation.w = 1.0;
+    marker.scale.x = circle_radius;
+    marker.scale.y = circle_radius;
+//     marker.scale.z = 0;
+    marker.color.a = 1.0; // Don't forget to set the alpha!
+    if (id == 0)
+      marker.color.r = 1.0; 
+    if (id == 2)
+      marker.color.g = 1.0; 
+    if (id == 1)
+      marker.color.b = 1.0;
+    //only if using a MESH_RESOURCE marker type:
+//     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
+    vis_pub.publish( marker );
+
   }
   
   void pub_circle(double x, double y, double radius, bool isLeft, int id)
