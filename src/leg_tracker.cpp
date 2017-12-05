@@ -251,6 +251,9 @@ public:
     ec.setInputCloud (cloud.makeShared());
     ec.extract (cluster_indices);
     
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cluster_centroids(new pcl::PointCloud<pcl::PointXYZ>);
+    cluster_centroids->header = cloud.header;
+    
     int j = 0;
     for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
     {
@@ -267,6 +270,9 @@ public:
       
       
       std::vector<double> c = computeCentroids(cloud_cluster);
+      pcl::PointXYZ p(c[0], c[1], 0.0);
+      cluster_centroids->points.push_back(p);
+      
       if (c.size() == 2)
 	pub_circle_with_id(c[0], c[1], j);
 //       std::stringstream ss;
@@ -274,7 +280,7 @@ public:
 //       writer.write<pcl::PointXYZ> (ss.str (), *cloud_cluster, false); //*
       j++;
     }
-      pcl_cloud_publisher.publish(cloud.makeShared());
+    pcl_cloud_publisher.publish(cluster_centroids);
 
     std::cout << "clusters: " << j << " datas." << std::endl;	
 
