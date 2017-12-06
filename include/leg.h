@@ -4,11 +4,17 @@
 
 class Leg
 {
+	
+static int id_counter = 0;
+	
+	
 private:
   int peopleId;
   iirob_filters::MultiChannelKalmanFilter<double>* filter;
   pcl::PointXYZ pos;
   int predictions;
+  int observations;
+  bool hasPair;
 
 public:
   Leg() {}
@@ -16,7 +22,7 @@ public:
   {
     peopleId = -1;
     pos.x = pos.y = pos.z = 0.0;
-    predictions = 0;
+    predictions = observations = 0;
     filter = new iirob_filters::MultiChannelKalmanFilter<double>();
     bool result = filter->configure();
     if (!result) { ROS_ERROR("Configure of filter has failed!"); }
@@ -46,6 +52,7 @@ public:
     pos.x = out[0];
     pos.y = out[1];
     predictions = 0;
+	observations++;
   }
   
   int getPredictions()
@@ -56,6 +63,42 @@ public:
   pcl::PointXYZ getPos()
   {
     return pos;
+  }
+  
+  int getPeopleId()
+  {
+	  return peopleId;
+  }
+  
+  int getObservations()
+  {
+	  return observations;
+  }
+  
+  void setPeopleId(int id)
+  {
+	  peopleId = id;
+  }
+  
+  void setPeopleId(Leg* snd)
+  {
+	  if (peopleId == -1)
+	  {
+		peopleId = id_counter++;
+	  }		  
+	  snd->setPeopleId(peopleId);
+	  hasPair = true;
+	  snd->setHasPair(true);
+  }
+  
+  void setHasPair(bool value)
+  {
+	  hasPair = value;
+  }
+  
+  bool hasPair()
+  {
+	  return hasPair;
   }
     
 };
