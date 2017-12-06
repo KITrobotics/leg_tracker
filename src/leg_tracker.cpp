@@ -35,6 +35,7 @@
 #include <std_msgs/Float64MultiArray.h>
 #include <pcl/kdtree/kdtree.h>
 #include <pcl/segmentation/extract_clusters.h>
+#include <leg.h>
 
 
 
@@ -79,6 +80,10 @@ private:
   cv::Point2f left_leg_prediction;
   cv::Point2f right_leg_prediction;
   int legs_gathered;
+  
+  
+  
+  std::vector<Leg> legs;
   
 //   iirob_filters::KalmanFilterParameters params_;
 
@@ -234,7 +239,127 @@ public:
     return true;
   }
   
-  void clustering(const PointCloud& cloud)
+  void initLeg(const pcl::PointXYZ& p, std::vector<double>& in, std::vector<double>& out)
+  {
+    Leg l;
+    if (!l.configure()) { ROS_ERROR("Configuring failed!"); return; }
+    in.clear();
+    in.push_back(p.x); in.push_back(p.y);
+    l.update(in, out);
+  }  
+  
+  void updateLeg(Leg& l, const pcl::PointXYZ& p, std::vector<double>& in, std::vector<double>& out)
+  {
+    in.clear();
+    in.push_back(p.x); in.push_back(p.y);
+    l.update(in, out);
+  }
+  
+  void predictLeg(int i)
+  {
+    if (legs[i].getPredictions() > 10)
+    {
+      legs.erase(legs.begin() + i);
+    }
+    else
+    {
+      legs[i].predict();
+    }
+  }
+  
+  void visLegs()
+  {
+    PointCloud cloud;
+    for (Leg l : legs)
+    {
+      cloud.points.push_back(l.getPos());
+    }
+    pcl_cloud_publisher.publish(cloud.makeShared());
+  }
+  
+  void matchLegCandidates(const PointCloud& cloud)
+  {
+    /*
+     * leg candidates from laser sensor
+     * leg prediction from kalman filter
+     * compute matching
+     */
+    PointCloud cluster_centroids;
+    cluster_centroids.header = cloud.header;
+    clustering(cloud, cluster_centroids);
+    
+    PointCloud predictions;
+    predictions.header = cloud.header;
+    computeKalmanFilterPredictions(predictions);
+    
+    if (predictions.points.size() == 0 && cluster_centroids.points.size() == 0) { return; }
+    
+    if (cluster_centroids.points.size() == 0)
+    {
+      for (int i = 0; i < legs.size(); i++)
+      {
+	predictLeg(i);
+      }
+      return;
+    }
+    
+    
+    std::vector<double> in, out;
+    
+    if (predictions.points.size() == 0)
+    { 
+      for (pcl::PointXYZ p : cluster_centroids.points)
+      {
+	initLeg(p, in, out);
+      }
+      return;
+    }
+    
+    for (int i = 0; i < legs.size(); i++) 
+    {
+      pcl::PointXYZ prediction, nearest;
+      prediction = legs[i].computePrediction();
+      if (!findMatch(prediction, cluster_centroids, nearest)) { predictLeg(i); }
+      updateLeg(legs[i], nearest, in, out);
+    }
+    
+    for (pcl::PointXYZ p : cluster_centroids.points)
+    {
+      initLeg(p, in, out);
+    }
+    
+    
+  }
+  
+  bool findMatch(pcl::PointXYZ& searchPoint, PointCloud& cloud, pcl::PointXYZ& out)
+  {
+    pcl::KdTreeFLANN<PointXYZ> kdtree;
+    kdtree.setInputCloud (cloud.makeShared();
+    std::vector<int> pointIdxRadius;
+    std::vector<float> pointsSquaredDistRadius;
+    float radius = 1.0;
+    // radius search
+    int count = kdtree.radiusSearch (searchPoint, radius, pointIdxRadius, pointsSquaredDistRadius);
+    if (count == 0) { return false; }
+    int K = 1;
+    std::vector<int> pointsIdx(K);
+    std::vector<float> pointsSquaredDist(K);
+    kdtree.nearestKSearch (searchPoint, K, pointsIdx, pointsSquaredDist);
+    out = cloud.points[pointsIdx[0]];
+    cloud.points.erase(cloud.points.begin() + pointsIdx[0]);
+    return true;  
+  }
+  
+  
+  void computeKalmanFilterPredictions(PointCloud& predictions)
+  {
+    for (Leg l : legs) 
+    {
+      predictions.points.push_back(l.computePrediction());
+    }
+  }
+  
+  void clustering(const PointCloud& cloud, PointCloud& cluster_centroids)
   {
     
     if (cloud.points.size() < 4) { return; }
@@ -251,8 +376,7 @@ public:
     ec.setInputCloud (cloud.makeShared());
     ec.extract (cluster_indices);
     
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cluster_centroids(new pcl::PointCloud<pcl::PointXYZ>);
-    cluster_centroids->header = cloud.header;
+    cluster_centroids.header = cloud.header;
     
     int j = 0;
     for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
@@ -269,12 +393,15 @@ public:
 //       std::cout << "PointCloud representing the Cluster: " << cloud_cluster->points.size () << " data points." << std::endl;
       
       
-      std::vector<double> c = computeCentroids(cloud_cluster);
-      pcl::PointXYZ p(c[0], c[1], 0.0);
-      cluster_centroids->points.push_back(p);
+      std::vector<double> c;
+      computeCircularity(cloud_cluster, c);
       
       if (c.size() == 2)
+      {
+	pcl::PointXYZ p(c[0], c[1], 0.0);
+	cluster_centroids.points.push_back(p);
 	pub_circle_with_id(c[0], c[1], j);
+      }
 //       std::stringstream ss;
 //       ss << "cloud_cluster_" << j << ".pcd";
 //       writer.write<pcl::PointXYZ> (ss.str (), *cloud_cluster, false); //*
@@ -466,7 +593,7 @@ public:
 //     {
 //       centerOfLegMeasurement = computeCentroids(cloud);
 //     }
-    if (!computeCenterOfLeg(cloud, centerOfLegMeasurement)) { return false; }
+    if (!computeCircularity(cloud, centerOfLegMeasurement)) { return false; }
     
     if (centerOfLegMeasurement.size() < num_elements_measurement) 
     { 
@@ -515,7 +642,7 @@ public:
     return true;
   }
   
-  bool computeCenterOfLeg(const PointCloud::Ptr cloud, std::vector<double>& center)
+  bool computeCircularity(const PointCloud::Ptr cloud, std::vector<double>& center)
   {
     int min_points = 4;
     int num_points = cloud->points.size();
@@ -625,7 +752,8 @@ public:
 
     if (!filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { return; }
     
-    clustering(filteredCloudXYZ);
+    PointCloud cluster_centroids;
+    matchLegCandidates(filteredCloudXYZ);
     
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
     
