@@ -258,15 +258,19 @@ public:
   
   void removeLeg(int index)
   {
-	  int id = legs[index].getPeopleId();
-	  for (int i = 0; i < legs.size(); i++)
-	  {
-		  if (i != index && legs[i].getPeopleId() == id)
-		  {
-			  legs[i].setHasPair(false);
-		  }
-	  }
-      legs.erase(legs.begin() + i);
+    if (legs[index].hasPair()) 
+    {
+      int id = legs[index].getPeopleId();
+      for (int i = 0; i < legs.size(); i++)
+      {
+	      if (i != index && legs[i].getPeopleId() == id)
+	      {
+		      legs[i].setHasPair(false);
+	      }
+      }
+    }
+      
+    legs.erase(legs.begin() + index);
   }
   
   void predictLeg(int i)
@@ -289,16 +293,16 @@ public:
       cloud.points.push_back(l.getPos());
 	  pub_circle_with_id(l.getPos().x, l.getPos().y, l.getPeopleId());
 	  std::cout << "peopleId: " << l.getPeopleId() << ", pos: (" << l.getPos().x << ", " << l.getPos().y << ")" << std::endl;
-	  std::cout << "   predictions: " << predictions << ", observations: " << observations << ", hasPair: " << hasPair << std::endl;
+	  std::cout << "   predictions: " << l.getPredictions() << ", observations: " << l.getObservations() << ", hasPair: " << l.hasPair() << std::endl;
     }
     pcl_cloud_publisher.publish(cloud.makeShared());
   }
   
-  void matchLegCandidates(const PointCloud& cluster_centroids)
+  void matchLegCandidates(PointCloud& cluster_centroids)
   {
     
     PointCloud predictions;
-    predictions.header = cloud.header;
+    predictions.header = cluster_centroids.header;
     computeKalmanFilterPredictions(predictions);
     
     if (predictions.points.size() == 0 && cluster_centroids.points.size() == 0) { return; }
@@ -364,7 +368,7 @@ public:
 			return;
 		}
 		
-		potential_legs.points.push_back(leg[i].getPos());
+		potential_legs.points.push_back(legs[i].getPos());
 		indices.push_back(i);
 	}
 	
@@ -376,10 +380,10 @@ public:
 	legs[index].setPeopleId(out);
   }
   
-  bool findMatch(pcl::PointXYZ& searchPoint, PointCloud& cloud, std::vector<int> indices, Leg* out)
+  bool findMatch(const pcl::PointXYZ searchPoint, const PointCloud& cloud, const std::vector<int>& indices, Leg* out)
   {
-	pcl::KdTreeFLANN<PointXYZ> kdtree;
-    kdtree.setInputCloud (cloud.makeShared();
+    pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+    kdtree.setInputCloud (cloud.makeShared());
     std::vector<int> pointIdxRadius;
     std::vector<float> pointsSquaredDistRadius;
     float radius = 1.0;
@@ -395,10 +399,10 @@ public:
     return true;  
   }
   
-  bool findAndEraseMatch(pcl::PointXYZ& searchPoint, PointCloud& cloud, pcl::PointXYZ& out)
+  bool findAndEraseMatch(pcl::PointXYZ& searchPoint, PointCloud cloud, pcl::PointXYZ& out)
   {
-    pcl::KdTreeFLANN<PointXYZ> kdtree;
-    kdtree.setInputCloud (cloud.makeShared();
+    pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+    kdtree.setInputCloud (cloud.makeShared());
     std::vector<int> pointIdxRadius;
     std::vector<float> pointsSquaredDistRadius;
     float radius = 0.3;
@@ -820,6 +824,7 @@ public:
     PointCloud cluster_centroids;
     clustering(filteredCloudXYZ, cluster_centroids);
     matchLegCandidates(cluster_centroids);
+    visLegs();
     
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
     

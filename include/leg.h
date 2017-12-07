@@ -5,7 +5,7 @@
 class Leg
 {
 	
-static int id_counter = 0;
+static int id_counter;
 	
 	
 private:
@@ -14,7 +14,7 @@ private:
   pcl::PointXYZ pos;
   int predictions;
   int observations;
-  bool hasPair;
+  bool hasPair_;
 
 public:
   Leg() {}
@@ -87,18 +87,18 @@ public:
 		peopleId = id_counter++;
 	  }		  
 	  snd->setPeopleId(peopleId);
-	  hasPair = true;
+	  hasPair_ = true;
 	  snd->setHasPair(true);
   }
   
   void setHasPair(bool value)
   {
-	  hasPair = value;
+	  hasPair_ = value;
   }
   
   bool hasPair()
   {
-	  return hasPair;
+	  return hasPair_;
   }
     
 };
