@@ -288,6 +288,8 @@ public:
     {
       cloud.points.push_back(l.getPos());
 	  pub_circle_with_id(l.getPos().x, l.getPos().y, l.getPeopleId());
+	  std::cout << "peopleId: " << l.getPeopleId() << ", pos: (" << l.getPos().x << ", " << l.getPos().y << ")" << std::endl;
+	  std::cout << "   predictions: " << predictions << ", observations: " << observations << ", hasPair: " << hasPair << std::endl;
     }
     pcl_cloud_publisher.publish(cloud.makeShared());
   }
