@@ -5,8 +5,7 @@
 class Leg
 {
 	
-static int id_counter;
-const static int z_coord = 0.178;
+// const static int z_coord = 0.178;
 	
 	
 private:
@@ -24,6 +23,7 @@ public:
     peopleId = -1;
     pos.x = pos.y = pos.z = 0.0;
     predictions = observations = 0;
+    hasPair_ = false;
     filter = new iirob_filters::MultiChannelKalmanFilter<double>();
     bool result = filter->configure();
     if (!result) { ROS_ERROR("Configure of filter has failed!"); }
@@ -34,7 +34,7 @@ public:
     std::vector<double> prediction;
     filter->computePrediction(prediction);
     pcl::PointXYZ p;
-    if (prediction.size() >= 2) { p.x = prediction[0]; p.y = prediction[1]; p.z = z_coord; }
+    if (prediction.size() >= 2) { p.x = prediction[0]; p.y = prediction[1]; p.z = 0.0; }
     return p;
   }
   
@@ -53,7 +53,7 @@ public:
     pos.x = out[0];
     pos.y = out[1];
     predictions = 0;
-	observations++;
+    observations++;
   }
   
   int getPredictions()
@@ -79,17 +79,6 @@ public:
   void setPeopleId(int id)
   {
 	  peopleId = id;
-  }
-  
-  void setPeopleId(Leg* snd)
-  {
-	  if (peopleId == -1)
-	  {
-		peopleId = id_counter++;
-	  }		  
-	  snd->setPeopleId(peopleId);
-	  hasPair_ = true;
-	  snd->setHasPair(true);
   }
   
   void setHasPair(bool value)
