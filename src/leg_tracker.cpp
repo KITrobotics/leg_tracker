@@ -346,7 +346,7 @@ public:
   {
 	for (int i = 0; i < legs.size(); i++) 
     {
-		if (legs[i].getObservations() > 4 && legs[i].getPeopleId() == -1)
+		if (legs[i].getObservations() > 4 || !legs[i].hasPair())
 		{
 			findSecondLeg(i);
 		}
@@ -359,7 +359,7 @@ public:
 	std::vector<int> indices;
 	for (int i = 0; i < legs.size(); i++) 
 	{
-		if (i == index && legs[i].hasPair())
+		if (i == index)
 		{
 			return;
 		}
