@@ -86,6 +86,7 @@ private:
   int legs_gathered;
   int min_observations;
   double radius_of_person;
+  int id_counter;
   
   
   
@@ -114,7 +115,7 @@ public:
     nh_.param("circle_radius", min_observations, 4);
     nh_.param("circle_radius", radius_of_person, 1.0);
     
-    legs_gathered = 0;
+    legs_gathered = id_counter = 0;
     
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 10, &LegDetector::processLaserScan, this);
     sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 10);
@@ -267,7 +268,7 @@ public:
     in.clear();
     in.push_back(p.x); in.push_back(p.y);
     l.update(in, out);
-    ROS_INFO("AFTER");
+    ROS_INFO("AFTER updateLeg");
     printLegsInfo();
   }
   
@@ -287,9 +288,9 @@ public:
 	      }
       }
     }
-      
+    if (legs[index].getPeopleId() != -1) { legs[index].setPeopleId(-1); }
     legs.erase(legs.begin() + index);
-    ROS_INFO("AFTER");
+    ROS_INFO("AFTER removeLeg");
     printLegsInfo();
   }
   
@@ -308,13 +309,14 @@ public:
     {
       legs[i].predict();
     }
-    ROS_INFO("AFTER");
+    ROS_INFO("AFTER predictLeg");
     printLegsInfo();
   }
   
   
   void printLegsInfo()
   {
+	int people = 0;
     for (Leg& l : legs)
     {
       ROS_INFO("peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d", 
@@ -426,21 +428,21 @@ public:
     ROS_INFO("findPeople");
     for (int i = 0; i < legs.size(); i++) 
     {
-      if (legs[i].getObservations() > min_observations || !legs[i].hasPair())
+      if (legs[i].getObservations() > min_observations && !legs[i].hasPair())
       {
 	      findSecondLeg(i);
       }
     }
   }
   
-  void findSecondLeg(int index)
+  void findSecondLeg(int fst_leg)
   {
     ROS_INFO("findSecondLeg");
 	PointCloud potential_legs;
 	std::vector<int> indices;
 	for (int i = 0; i < legs.size(); i++) 
 	{
-		if (i == index || legs[i].hasPair())
+		if (i == fst_leg || legs[i].hasPair())
 		{
 			continue;
 		}
@@ -451,23 +453,19 @@ public:
 	
 	if (potential_legs.size() == 0) { return; }
 	
-	int out_index = findMatch(legs[index].getPos(), potential_legs, indices);
-	if (out_index == -1) { ROS_INFO("Could not find second leg!"); return; }
+	int snd_leg = findMatch(legs[fst_leg].getPos(), potential_legs, indices);
+	if (snd_leg == -1) { ROS_INFO("Could not find second leg!"); return; }
 	
-	setPeopleId(index, out_index);
+	setPeopleId(fst_leg, snd_leg);
   }  
   
-  void setPeopleId(int id)
+  void setPeopleId(int fst_leg, int snd_leg)
   {
-//     if (!snd) { ROS_INFO("setPeopleId: Leg pointer was not set!"); return; }
-//     
-//     if (peopleId == -1)
-//     {
-// 	  peopleId = id_counter++;
-//     }		  
-//     snd->setPeopleId(peopleId);
-//     hasPair_ = true;
-//     snd->setHasPair(true);
+	  int id = id_counter++;
+	  legs[fst_leg].setPeopleId(id);
+	  legs[snd_leg].setPeopleId(id);
+	  legs[fst_leg].setHasPair(true);
+	  legs[snd_leg].setHasPair(true);
   }
   
   int findMatch(pcl::PointXYZ searchPoint, PointCloud cloud, const std::vector<int>& indices)
@@ -481,11 +479,12 @@ public:
     std::vector<int> pointIdxRadius;
     std::vector<float> pointsSquaredDistRadius;
     int count = kdtree.radiusSearch (searchPoint, radius_of_person, pointIdxRadius, pointsSquaredDistRadius);
+	
     if (count == 0) { return -1; }
     
     if (count > 1) 
     { 
-      //interesting 
+      //interesting more than on leg matched
     
     }
     
