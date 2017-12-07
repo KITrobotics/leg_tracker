@@ -27,6 +27,7 @@
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/sample_consensus/sac.h>
 #include <visualization_msgs/Marker.h>
+#include <visualization_msgs/MarkerArray.h>
 #include <pcl/filters/radius_outlier_removal.h>
 #include <iostream>
 #include <iirob_filters/kalman_filter.h>
@@ -53,6 +54,7 @@
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
 
 const int cluster_size = 2;
+const int z_coordinate = 0.178;
 
 class LegDetector
 {
@@ -63,6 +65,8 @@ private:
   ros::Publisher pcl_cloud_publisher;
   ros::Publisher pos_vel_acc_lleg_pub;
   ros::Publisher pos_vel_acc_rleg_pub;
+  ros::Publisher marker_array_publisher;
+  
   std::string transform_link;
   std::string scan_topic;
   double x_lower_limit;
@@ -111,9 +115,10 @@ public:
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 10, &LegDetector::processLaserScan, this);
     sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 10);
     pcl_cloud_publisher = nh_.advertise<PointCloud> ("scan2pclCloud", 100);
-    vis_pub = nh_.advertise<visualization_msgs::Marker>("leg_circles", 0);
+    vis_pub = nh_.advertise<visualization_msgs::Marker>("leg_circles", 10);
     pos_vel_acc_lleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_lleg", 10);
     pos_vel_acc_rleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_rleg", 10);
+    marker_array_publisher = nh_.advertise<visualization_msgs::MarkerArray>("marker_array", 10);
       
 /*
     int n = 6; // Number of states
@@ -285,18 +290,54 @@ public:
     }
   }
   
-  void visLegs()
+  void visLegs(PointCloud& cloud)
   {
-    PointCloud cloud;
+    cloud.points.clear();
+    
+    visualization_msgs::MarkerArray ma;
     for (Leg l : legs)
     {
       cloud.points.push_back(l.getPos());
-	  pub_circle_with_id(l.getPos().x, l.getPos().y, l.getPeopleId());
-	  std::cout << "peopleId: " << l.getPeopleId() << ", pos: (" << l.getPos().x << ", " << l.getPos().y << ")" << std::endl;
-	  std::cout << "   predictions: " << l.getPredictions() << ", observations: " << l.getObservations() << ", hasPair: " << l.hasPair() << std::endl;
+      ROS_INFO("peopleId: %d, pos: (%f, %f)", l.getPeopleId(), l.getPos().x, l.getPos().y);
+      ROS_INFO("   predictions: %d, observations: %d, hasPair: %d", l.getPredictions(), l.getObservations(), l.hasPair());
+      ma.markers.push_back(getMarker(l.getPos().x, l.getPos().y, l.getPeopleId()));
     }
+    marker_array_publisher.publish(ma);
     pcl_cloud_publisher.publish(cloud.makeShared());
   }
+  
+  
+  visualization_msgs::Marker getMarker(double x, double y, int id)
+  {
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = transform_link;
+    marker.header.stamp = ros::Time();
+    marker.ns = nh_.getNamespace();
+    marker.id = id;
+    marker.type = visualization_msgs::Marker::CYLINDER;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.position.x = x;
+    marker.pose.position.y = y;
+    marker.pose.position.z = z_coordinate;
+//     marker.pose.orientation.x = 0.0;
+//     marker.pose.orientation.y = 0.0;
+//     marker.pose.orientation.z = 0.0;
+//     marker.pose.orientation.w = 1.0;
+    marker.scale.x = circle_radius;
+    marker.scale.y = circle_radius;
+//     marker.scale.z = 0;
+    marker.color.a = 1.0; // Don't forget to set the alpha!
+//     if (id == 0)
+//       marker.color.r = 1.0; 
+//     if (id == 2)
+//       marker.color.g = 1.0; 
+//     if (id == 1)
+//       marker.color.b = 1.0;
+    //only if using a MESH_RESOURCE marker type:
+//     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
+    return marker;
+  }
+  
   
   void matchLegCandidates(PointCloud& cluster_centroids)
   {
@@ -824,7 +865,7 @@ public:
     PointCloud cluster_centroids;
     clustering(filteredCloudXYZ, cluster_centroids);
     matchLegCandidates(cluster_centroids);
-    visLegs();
+//     visLegs(cluster_centroids);
     
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
     
@@ -856,7 +897,7 @@ public:
     marker.action = visualization_msgs::Marker::ADD;
     marker.pose.position.x = x;
     marker.pose.position.y = y;
-//     marker.pose.position.z = 0;
+    marker.pose.position.z = z_coordinate;
 //     marker.pose.orientation.x = 0.0;
 //     marker.pose.orientation.y = 0.0;
 //     marker.pose.orientation.z = 0.0;
@@ -888,7 +929,7 @@ public:
     marker.action = visualization_msgs::Marker::ADD;
     marker.pose.position.x = x;
     marker.pose.position.y = y;
-//     marker.pose.position.z = 0;
+    marker.pose.position.z = z_coordinate;
 //     marker.pose.orientation.x = 0.0;
 //     marker.pose.orientation.y = 0.0;
 //     marker.pose.orientation.z = 0.0;

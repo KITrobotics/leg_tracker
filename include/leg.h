@@ -6,6 +6,7 @@ class Leg
 {
 	
 static int id_counter;
+const static int z_coord = 0.178;
 	
 	
 private:
@@ -33,7 +34,7 @@ public:
     std::vector<double> prediction;
     filter->computePrediction(prediction);
     pcl::PointXYZ p;
-    if (prediction.size() >= 2) { p.x = prediction[0]; p.y = prediction[1]; p.z = 0.0; }
+    if (prediction.size() >= 2) { p.x = prediction[0]; p.y = prediction[1]; p.z = z_coord; }
     return p;
   }
   
