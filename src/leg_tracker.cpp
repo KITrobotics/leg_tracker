@@ -37,6 +37,7 @@
 #include <pcl/kdtree/kdtree.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <leg.h>
+#include <math.h>
 
 
 
@@ -54,7 +55,6 @@
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
 
 const int cluster_size = 2;
-const int z_coordinate = 0.178;
 
 class LegDetector
 {
@@ -78,15 +78,17 @@ private:
   ros::Publisher vis_pub;
   double ransac_dist_threshold;
   std::string circle_fitting;
-  double circle_radius;
+  double leg_radius;
   std::vector<double> centerOfLegLastMeasurement;
   pcl::PointXYZ person_center;
   cv::Point2f left_leg_prediction;
   cv::Point2f right_leg_prediction;
   int legs_gathered;
   int min_observations;
+  int min_predictions;
   double radius_of_person;
   int id_counter;
+  double z_coordinate;
   
   
   
@@ -111,9 +113,12 @@ public:
     nh_.param("y_upper_limit", y_upper_limit, 0.5);
     nh_.param("ransac_dist_threshold", ransac_dist_threshold, 0.1);
     nh_.param("circle_fitting", circle_fitting, std::string("centroid"));
-    nh_.param("circle_radius", circle_radius, 0.1);
-    nh_.param("circle_radius", min_observations, 4);
-    nh_.param("circle_radius", radius_of_person, 1.0);
+    nh_.param("leg_radius", leg_radius, 0.1);
+    nh_.param("min_observations", min_observations, 4);
+    nh_.param("min_predictions", min_predictions, 10);
+    nh_.param("radius_of_person", radius_of_person, 1.0);
+    nh_.param("z_coordinate", z_coordinate, 0.178);
+    
     
     legs_gathered = id_counter = 0;
     
@@ -301,7 +306,7 @@ public:
   {
     ROS_INFO("PredictLeg  legs[i].getPredictions: %d, legs[i].getPeopleId: %d", legs[i].getPredictions(), legs[i].getPeopleId());
     printLegsInfo();
-    if (legs[i].getPredictions() > 10 && legs[i].getPeopleId() != -1)
+    if (legs[i].getPredictions() > min_predictions)
     {
       removeLeg(i);
     }
@@ -319,47 +324,48 @@ public:
 	int people = 0;
     for (Leg& l : legs)
     {
-      ROS_INFO("peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d", 
-      l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
+      ROS_INFO("peopleId: %d, pos: (%f, %f, %f), predictions: %d, observations: %d, hasPair: %d", 
+      l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPos().z, l.getPredictions(), l.getObservations(), l.hasPair());
     }
   }
   
   void visLegs(PointCloud& cloud)
   {
     cloud.points.clear();
-    
     visualization_msgs::MarkerArray ma;
+    int id = 0;
     for (Leg& l : legs)
     {
-      ROS_INFO("VIS peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d", 
-      l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
+      ROS_INFO("VIS peopleId: %d, pos: (%f, %f, %f), predictions: %d, observations: %d, hasPair: %d", 
+      l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPos().z, l.getPredictions(), l.getObservations(), l.hasPair());
       cloud.points.push_back(l.getPos());
-      ma.markers.push_back(getMarker(l.getPos().x, l.getPos().y));
+      ma.markers.push_back(getMarker(l.getPos().x, l.getPos().y, id));
+      id++;
     }
     marker_array_publisher.publish(ma);
     pcl_cloud_publisher.publish(cloud.makeShared());
   }
   
   
-  visualization_msgs::Marker getMarker(double x, double y)
+  visualization_msgs::Marker getMarker(double x, double y, int id)
   {
     visualization_msgs::Marker marker;
     marker.header.frame_id = transform_link;
     marker.header.stamp = ros::Time();
     marker.ns = nh_.getNamespace();
-//     marker.id = id;
+    marker.id = id;
     marker.type = visualization_msgs::Marker::CYLINDER;
     marker.action = visualization_msgs::Marker::ADD;
     marker.pose.position.x = x;
     marker.pose.position.y = y;
-    marker.pose.position.z = z_coordinate;
+    marker.pose.position.z = z_coordinate / 2;
 //     marker.pose.orientation.x = 0.0;
 //     marker.pose.orientation.y = 0.0;
 //     marker.pose.orientation.z = 0.0;
 //     marker.pose.orientation.w = 1.0;
-    marker.scale.x = circle_radius;
-    marker.scale.y = circle_radius;
-//     marker.scale.z = 0;
+    marker.scale.x = leg_radius;
+    marker.scale.y = leg_radius;
+    marker.scale.z = z_coordinate;
     marker.color.a = 1.0; // Don't forget to set the alpha!
 //     if (id == 0)
 //       marker.color.r = 1.0; 
@@ -372,10 +378,18 @@ public:
     return marker;
   }
   
+  void printClusterInfo(const PointCloud& cluster_centroids)
+  {
+    ROS_INFO("Clusters:");
+    for (int i = 0; i < cluster_centroids.points.size(); i++)
+    {
+      ROS_INFO("cluster %d: (%f, %f, %f)", i, cluster_centroids.points[i].x, cluster_centroids.points[i].y, cluster_centroids.points[i].z);
+    }
+  }
   
   void matchLegCandidates(PointCloud cluster_centroids)
   {
-    
+    printClusterInfo(cluster_centroids);
     PointCloud predictions;
     predictions.header = cluster_centroids.header;
     computeKalmanFilterPredictions(predictions);
@@ -468,12 +482,61 @@ public:
 	  legs[snd_leg].setHasPair(true);
   }
   
-  int findMatch(pcl::PointXYZ searchPoint, PointCloud cloud, const std::vector<int>& indices)
+  void printCloudPoints(const PointCloud& cloud)
   {
-    ROS_INFO("findMatch");
+    for (int i = 0; i < cloud.points.size(); i++)
+    {
+      ROS_INFO("Point %d: (%f, %f, %f)", i, cloud.points[i].x, cloud.points[i].y, cloud.points[i].z);
+    }
+  }
+  
+  void vis_people()
+  {
+    for (int i = 0; i < legs.size(); i++) 
+    {
+      int id = legs[i].getPeopleId();
+      if (id != -1 && legs[i].hasPair())
+      {
+	for (int j = i + 1; j < legs.size(); j++)
+	{
+	  if (legs[i].getPeopleId() == id)
+	  {
+	    double x = (legs[i].getPos().x + legs[j].getPos().x) / 2;
+	    double y = (legs[i].getPos().y + legs[j].getPos().y) / 2;
+	    double dist = sqrt(pow(legs[i].getPos().x - legs[j].getPos().x, 2) + pow(legs[i].getPos().y - legs[j].getPos().y, 2));
+	    double scale_x = dist + 2.5 * leg_radius;
+	    double scale_y = 3 * leg_radius;
+	    double angle_x = abs(legs[i].getPos().x - legs[j].getPos().x);
+	    double angle_y = abs(legs[i].getPos().y - legs[j].getPos().y);
+	    ROS_INFO("angle_x: %f, angle_y: %f", angle_x, angle_y);
+	    double angle = 0.0;
+	    if (angle_x != 0) { angle = atan( angle_y / angle_x ); }
+	    double orientation_x = 0.0/*sin(angle/2)*/;
+	    double orientation_y = 0.0;
+	    double orientation_z = sin(angle/2);
+	    double orientation_w = /*cos(angle/2)*/1;
+	    
+// 	    Eigen::Affine3f transform_2(x, y, 0.0);
+// 	    transform_2.rotate (Eigen::AngleAxisf (angle, Eigen::Vector3f::UnitY()));
+// 	    
+// 	    pcl::transformPointCloud (*source_cloud, *transformed_cloud, transform_2);
+
+	    
+	    ROS_INFO("Oval theta: %f, x: %f, y: %f, s_x: %f, s_y: %f, o_x: %f, o_y: %f, o_z: %f, o_w: %f, id: %d", 
+	      angle, x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
+	    pub_oval(x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
+	  }
+	}
+      }
+    }
+  }
+  
+  int findMatch(const pcl::PointXYZ& searchPoint, const PointCloud& cloud, const std::vector<int>& indices)
+  {
+    ROS_INFO("findMatch for (%f, %f, %f) with radius %f", searchPoint.x, searchPoint.y, searchPoint.z, radius_of_person);
+    printCloudPoints(cloud);
     int out_index = -1;
-    cloud.points.push_back(searchPoint);
-    if (cloud.points.size() == 0) { return -1; }
+    if (cloud.points.size() == 0) { return out_index; }
     pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
     kdtree.setInputCloud (cloud.makeShared());
     std::vector<int> pointIdxRadius;
@@ -779,12 +842,12 @@ public:
     std::vector<double> prediction;
     if (isLeft) { left_leg_filter->predict(prediction); left_leg_prediction = cv::Point2f(prediction[0], prediction[1]); }
     else { right_leg_filter->predict(prediction); right_leg_prediction = cv::Point2f(prediction[0], prediction[1]); }
-    pub_circle(prediction[0], prediction[1], circle_radius, isLeft, isLeft ? 2 : 3);
+    pub_circle(prediction[0], prediction[1], leg_radius, isLeft, isLeft ? 2 : 3);
     
     if (isLeft) { left_leg_filter->update(centerOfLegMeasurement, centerOfLegKalman); }
     else { right_leg_filter->update(centerOfLegMeasurement, centerOfLegKalman); }
     
-//     pub_circle(centerOfLegMeasurement[0], centerOfLegMeasurement[1], circle_radius, isLeft, isLeft ? 0 : 1);
+//     pub_circle(centerOfLegMeasurement[0], centerOfLegMeasurement[1], leg_radius, isLeft, isLeft ? 0 : 1);
 
     
     
@@ -794,7 +857,7 @@ public:
       return false; 
     }
     
-//     pub_circle(centerOfLegKalman[0], centerOfLegKalman[1], circle_radius, isLeft, isLeft ? 2 : 3);
+//     pub_circle(centerOfLegKalman[0], centerOfLegKalman[1], leg_radius, isLeft, isLeft ? 2 : 3);
     if (legs_gathered == 1) {
       person_center.x = (person_center.x + centerOfLegKalman[0]) / 2;
       person_center.y = (person_center.y + centerOfLegKalman[1]) / 2;
@@ -927,6 +990,7 @@ public:
     clustering(filteredCloudXYZ, cluster_centroids);
     matchLegCandidates(cluster_centroids);
     visLegs(cluster_centroids);
+    vis_people();
     
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
     
@@ -963,8 +1027,8 @@ public:
 //     marker.pose.orientation.y = 0.0;
 //     marker.pose.orientation.z = 0.0;
 //     marker.pose.orientation.w = 1.0;
-    marker.scale.x = circle_radius;
-    marker.scale.y = circle_radius;
+    marker.scale.x = leg_radius;
+    marker.scale.y = leg_radius;
 //     marker.scale.z = 0;
     marker.color.a = 1.0; // Don't forget to set the alpha!
     if (id == 0)
@@ -977,6 +1041,59 @@ public:
 //     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
     vis_pub.publish( marker );
 
+  }
+  
+  void pub_oval(double x, double y, double scale_x, double scale_y, double orientation_x, 
+    double orientation_y, double orientation_z, double orientation_w, int id)
+  {
+    
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = transform_link;
+    marker.header.stamp = ros::Time();
+    marker.ns = nh_.getNamespace();
+    marker.id = id;
+    marker.type = visualization_msgs::Marker::CYLINDER;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.position.x = x;
+    marker.pose.position.y = y;
+    marker.pose.position.z = z_coordinate;
+    marker.pose.orientation.x = orientation_x;
+    marker.pose.orientation.y = orientation_y;
+    marker.pose.orientation.z = orientation_z;
+    marker.pose.orientation.w = orientation_w;
+    marker.scale.x = scale_x;
+    marker.scale.y = scale_y;
+//     marker.scale.z = 0;
+    marker.color.a = 1.0; // Don't forget to set the alpha!
+//     if (id == 0)
+//       marker.color.r = 1.0; 
+//     if (id == 2)
+//       marker.color.g = 1.0; 
+//     if (id == 1)
+//       marker.color.b = 1.0;
+    //only if using a MESH_RESOURCE marker type:
+//     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
+    vis_pub.publish( marker );
+  }
+  
+  
+  void pub_circle_with_radius(double x, double y, double radius)
+  {
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = transform_link;
+    marker.header.stamp = ros::Time();
+    marker.ns = nh_.getNamespace();
+    marker.id = 0;
+    marker.type = visualization_msgs::Marker::CYLINDER;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.position.x = x;
+    marker.pose.position.y = y;
+    marker.pose.position.z = z_coordinate / 2;
+    marker.scale.x = radius;
+    marker.scale.y = radius;
+    marker.scale.z = z_coordinate;
+    marker.color.a = 1.0; // Don't forget to set the alpha!
+    vis_pub.publish( marker );
   }
   
   void pub_circle(double x, double y, double radius, bool isLeft, int id)

@@ -6,6 +6,8 @@ y_lower_limit: -1.0
 y_upper_limit: 1.0
 ransac_dist_threshold: 0.01
 circle_fitting: centroid # ransac or centroid
-circle_radius: 0.1
+leg_radius: 0.1
 min_observations: 4
 radius_of_person: 1.0
+min_predictions: 10
+z_coordinate: 0.178

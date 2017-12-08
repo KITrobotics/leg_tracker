@@ -44,6 +44,7 @@ public:
     filter->predict(prediction);
     if (prediction.size() >= 2) { pos.x = prediction[0]; pos.y = prediction[1]; }
     predictions++;
+    observations = 0;
   }
   
   void update(const std::vector<double>& in, std::vector<double>& out)
