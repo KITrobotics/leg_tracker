@@ -38,7 +38,7 @@
 #include <pcl/segmentation/extract_clusters.h>
 #include <leg.h>
 #include <math.h>
-
+#include <Eigen/Geometry>
 
 
 /*
@@ -105,6 +105,17 @@ public:
   LegDetector(ros::NodeHandle nh) : nh_(nh), /*params_{std::string(nh_.getNamespace() + "/KalmanFilter")}, */
       tfListener(tfBuffer)
   {
+    init();
+//     left_leg_filter = new iirob_filters::MultiChannelKalmanFilter<double>();
+//     if (!left_leg_filter->configure()) { ROS_ERROR("Configure of filter has failed!"); nh_.shutdown(); }
+//     right_leg_filter = new iirob_filters::MultiChannelKalmanFilter<double>();
+//     if (!right_leg_filter->configure()) { ROS_ERROR("Configure of filter has failed!"); nh_.shutdown(); }
+    
+  }
+  ~LegDetector() {}
+  
+  void init()
+  {
     nh_.param("scan_topic", scan_topic, std::string("/base_laser_rear/scan"));
     nh_.param("transform_link", transform_link, std::string("base_link"));
     nh_.param("x_lower_limit", x_lower_limit, 0.0);
@@ -119,72 +130,17 @@ public:
     nh_.param("radius_of_person", radius_of_person, 1.0);
     nh_.param("z_coordinate", z_coordinate, 0.178);
     
-    
     legs_gathered = id_counter = 0;
     
-    sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 10, &LegDetector::processLaserScan, this);
+    sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 1, &LegDetector::processLaserScan, this);
     sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 10);
     pcl_cloud_publisher = nh_.advertise<PointCloud> ("scan2pclCloud", 100);
     vis_pub = nh_.advertise<visualization_msgs::Marker>("leg_circles", 10);
     pos_vel_acc_lleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_lleg", 10);
     pos_vel_acc_rleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_rleg", 10);
     marker_array_publisher = nh_.advertise<visualization_msgs::MarkerArray>("marker_array", 10);
-      
-/*
-    int n = 6; // Number of states
-    int m = 2; // Number of measurements
-
-    double dt = 1.0/20; // Time step
-    
-    Eigen::MatrixXd A(n, n); // System dynamics matrix
-//     Eigen::MatrixXd B(n, m);
-    Eigen::MatrixXd C(m, n); // Output matrix
-    Eigen::MatrixXd Q(n, n); // Process noise covariance
-    Eigen::MatrixXd R(m, m); // Measurement noise covariance
-    Eigen::MatrixXd P(n, n); // Estimate error covariance
-    
-    A << 1, 0, dt, 0, pow(dt, 2) / 2, 0, 
-	 0, 1, 0, dt, 0, pow(dt, 2)/2, 
-	 0, 0, 1, 0, dt, 0,
-	 0, 0, 0, 1, 0, dt,
-	 0, 0, 0, 0, 1, 0,
-	 0, 0, 0, 0, 0, 1;
-//     B << (dt^2) / 2, 0, 0, (dt^2) / 2, dt, 0, 0, dt;
-    C << 1, 0, 0, 0, 0, 0, 
-	 0, 1, 0, 0, 0, 0;
-
-    // Reasonable covariance matrices
-    Q << 0.5, 0, 0, 0, 0, 0, 
-	 0, 0.5, 0, 0, 0, 0, 
-	 0, 0, 0.5, 0, 0, 0,
-	 0, 0, 0, 0.5, 0, 0,
-	 0, 0, 0, 0, 0.5, 0,
-	 0, 0, 0, 0, 0, 0.5;
-//     Q << .05, .05, .0, 
-// 	 .05, .05, .0, 
-// 	 .0, .0, .0;
-    R << pow(0.04, 2), 0, 
-	 0, pow(0.04, 2);
-//     P.setIdentity();
-    P << 10, 0, 0, 0, 0, 0, 
-	 0, 10, 0, 0, 0, 0, 
-	 0, 0, 10, 0, 0, 0,
-	 0, 0, 0, 10, 0, 0,
-	 0, 0, 0, 0, 10, 0,
-	 0, 0, 0, 0, 0, 10;
-//     P << .1, .1, .1, 
-// 	 .1, 10000, 10, 
-// 	 .1, 10, 100;
-    
-    Eigen::VectorXd x0(n);
-    x0 << 0, 0, 0;
-    */
-    left_leg_filter = new iirob_filters::MultiChannelKalmanFilter<double>();
-    if (!left_leg_filter->configure()) { ROS_ERROR("Configure of filter has failed!"); nh_.shutdown(); }
-    right_leg_filter = new iirob_filters::MultiChannelKalmanFilter<double>();
-    if (!right_leg_filter->configure()) { ROS_ERROR("Configure of filter has failed!"); nh_.shutdown(); }
+//       
   }
-  ~LegDetector() {}
   
   void handleNotSetParameter(std::string parameter)
   {
@@ -214,39 +170,42 @@ public:
     tf2::doTransform(from, to, transformStamped);
   }
   
-  bool filterPCLPointCloud(const PointCloud& in, PointCloud& out)
+  bool filterPCLPointCloud(const PointCloud::Ptr in, PointCloud::Ptr out)
   {
-    if (in.points.size() < 5) 
+    if (in->points.size() < 5) 
     { 
       ROS_ERROR("Filtering: Too small number of points in the input PointCloud!"); 
       return false; 
     }
     
-    PointCloud path_throw_filtered_x;
-    PointCloud path_throw_filtered_y;
-    PointCloud sor_filtered;
+    PointCloud::Ptr path_throw_filtered_x (new PointCloud());
+    PointCloud::Ptr path_throw_filtered_y (new PointCloud());
+//     PointCloud::Ptr sor_filtered (new PointCloud());
+      
+//     PointCloud path_throw_filtered_x;
+//     PointCloud path_throw_filtered_y;
+//     PointCloud sor_filtered;
     
     pcl::PassThrough<pcl::PointXYZ> pass;
-    pass.setInputCloud(in.makeShared());
-    pass.setFilterFieldName("x");
-    pass.setFilterLimits(x_lower_limit, x_upper_limit);
+//     pass.setInputCloud(in);
+//     pass.setFilterFieldName("x");
+//     pass.setFilterLimits(x_lower_limit, x_upper_limit);
     //pass.setFilterLimitsNegative (true);
-    pass.filter (path_throw_filtered_x);
-    pass.setInputCloud(path_throw_filtered_x.makeShared());
-    pass.setFilterFieldName("y");
-    pass.setFilterLimits(y_lower_limit, y_upper_limit);
-    pass.filter (path_throw_filtered_y);
+//     pass.filter (*path_throw_filtered_x);
+//     pass.setInputCloud(path_throw_filtered_x);
+//     pass.setFilterFieldName("y");
+//     pass.setFilterLimits(y_lower_limit, y_upper_limit);
+//     pass.filter (*path_throw_filtered_y);
+//     
+//     pcl::RadiusOutlierRemoval<pcl::PointXYZ> outrem;
+//     // build the filter
+//     outrem.setInputCloud(path_throw_filtered_y);
+//     outrem.setRadiusSearch(0.02);
+//     outrem.setMinNeighborsInRadius (2);
+//     // apply filter
+//     outrem.filter (*out);
     
-    
-    pcl::RadiusOutlierRemoval<pcl::PointXYZ> outrem;
-    // build the filter
-    outrem.setInputCloud(path_throw_filtered_y.makeShared());
-    outrem.setRadiusSearch(0.02);
-    outrem.setMinNeighborsInRadius (2);
-    // apply filter
-    outrem.filter (out);
-    
-    if (out.points.size() < 5) 
+    if (out->points.size() < 5) 
     { 
       ROS_ERROR("Filtering: Too small number of points in the resulting PointCloud!"); 
       return false; 
@@ -506,20 +465,17 @@ public:
 	    double dist = sqrt(pow(legs[i].getPos().x - legs[j].getPos().x, 2) + pow(legs[i].getPos().y - legs[j].getPos().y, 2));
 	    double scale_x = dist + 2.5 * leg_radius;
 	    double scale_y = 3 * leg_radius;
+	    ROS_INFO("legs[i].getPos().x - legs[j].getPos().x: %f", legs[i].getPos().x - legs[j].getPos().x);
 	    double angle_x = abs(legs[i].getPos().x - legs[j].getPos().x);
 	    double angle_y = abs(legs[i].getPos().y - legs[j].getPos().y);
 	    ROS_INFO("angle_x: %f, angle_y: %f", angle_x, angle_y);
-	    double angle = 0.0;
-	    if (angle_x != 0) { angle = atan( angle_y / angle_x ); }
-	    double orientation_x = 0.0/*sin(angle/2)*/;
-	    double orientation_y = 0.0;
-	    double orientation_z = sin(angle/2);
-	    double orientation_w = /*cos(angle/2)*/1;
-	    
-// 	    Eigen::Affine3f transform_2(x, y, 0.0);
-// 	    transform_2.rotate (Eigen::AngleAxisf (angle, Eigen::Vector3f::UnitY()));
-// 	    
-// 	    pcl::transformPointCloud (*source_cloud, *transformed_cloud, transform_2);
+	    double angle = atan2( angle_y, angle_x ); 
+	    Eigen::Quaterniond q;
+	    q = Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitZ());
+	    double orientation_w = q.w();
+	    double orientation_x = q.x();
+	    double orientation_y = q.y();
+	    double orientation_z = q.z();
 
 	    
 	    ROS_INFO("Oval theta: %f, x: %f, y: %f, s_x: %f, s_y: %f, o_x: %f, o_y: %f, o_z: %f, o_w: %f, id: %d", 
@@ -981,13 +937,15 @@ public:
 
     pcl_conversions::toPCL(tfTransformedCloud, *pcl_pc2);
 
-    PointCloud cloudXYZ, filteredCloudXYZ;
-    pcl::fromPCLPointCloud2(*pcl_pc2, cloudXYZ);
+//     PointCloud cloudXYZ, filteredCloudXYZ;
+    PointCloud::Ptr cloudXYZ (new PointCloud());
+    PointCloud::Ptr filteredCloudXYZ (new PointCloud());
+    pcl::fromPCLPointCloud2(*pcl_pc2, *cloudXYZ);
 
-    if (!filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { return; }
+    if (!this->filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { return; }
     
     PointCloud cluster_centroids;
-    clustering(filteredCloudXYZ, cluster_centroids);
+    clustering(*filteredCloudXYZ, cluster_centroids);
     matchLegCandidates(cluster_centroids);
     visLegs(cluster_centroids);
     vis_people();
@@ -1137,13 +1095,13 @@ public:
   
 };
 
-  filters::MultiChannelFilterBase<double>* f;
+
+//   filters::MultiChannelFilterBase<double>* f;
 
 int main(int argc, char **argv)
 {
   ros::init(argc, argv,"leg_tracker");
   ros::NodeHandle nh("~");
-  
   LegDetector ld(nh);
   ros::spin();
   
