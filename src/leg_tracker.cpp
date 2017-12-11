@@ -91,6 +91,8 @@ private:
   int id_counter;
   double z_coordinate;
   
+  
+  
   //PeopleMap persons;
   std::vector<Leg> removed_legs;
   
@@ -129,7 +131,7 @@ public:
     nh_.param("circle_fitting", circle_fitting, std::string("centroid"));
     nh_.param("leg_radius", leg_radius, 0.1);
     nh_.param("min_observations", min_observations, 4);
-    nh_.param("min_predictions", min_predictions, 10);
+    nh_.param("min_predictions", min_predictions, 7);
     nh_.param("radius_of_person", radius_of_person, 1.0);
     nh_.param("z_coordinate", z_coordinate, 0.178);
     
@@ -173,42 +175,43 @@ public:
     tf2::doTransform(from, to, transformStamped);
   }
   
-  bool filterPCLPointCloud(const PointCloud::Ptr in, PointCloud::Ptr out)
+  bool filterPCLPointCloud(const PointCloud& in, PointCloud& out)
   {
-    if (in->points.size() < 5) 
+    if (in.points.size() < 5) 
     { 
       ROS_ERROR("Filtering: Too small number of points in the input PointCloud!"); 
       return false; 
     }
     
-    PointCloud::Ptr path_throw_filtered_x (new PointCloud());
-    PointCloud::Ptr path_throw_filtered_y (new PointCloud());
+//     PointCloud::Ptr path_throw_filtered_x (new PointCloud());
+//     PointCloud::Ptr path_throw_filtered_y (new PointCloud());
 //     PointCloud::Ptr sor_filtered (new PointCloud());
-      
-//     PointCloud path_throw_filtered_x;
-//     PointCloud path_throw_filtered_y;
+//       
+    PointCloud path_throw_filtered_x;
+    PointCloud path_throw_filtered_y;
 //     PointCloud sor_filtered;
     
     pcl::PassThrough<pcl::PointXYZ> pass;
-//     pass.setInputCloud(in);
-//     pass.setFilterFieldName("x");
-//     pass.setFilterLimits(x_lower_limit, x_upper_limit);
-    //pass.setFilterLimitsNegative (true);
-//     pass.filter (*path_throw_filtered_x);
-//     pass.setInputCloud(path_throw_filtered_x);
-//     pass.setFilterFieldName("y");
-//     pass.setFilterLimits(y_lower_limit, y_upper_limit);
-//     pass.filter (*path_throw_filtered_y);
-//     
-//     pcl::RadiusOutlierRemoval<pcl::PointXYZ> outrem;
-//     // build the filter
-//     outrem.setInputCloud(path_throw_filtered_y);
-//     outrem.setRadiusSearch(0.02);
-//     outrem.setMinNeighborsInRadius (2);
-//     // apply filter
-//     outrem.filter (*out);
+    pass.setInputCloud(in.makeShared());
+    pass.setFilterFieldName("x");
+    ROS_WARN("x_lower_limit: %f, x_upper_limit: %f", x_lower_limit, x_upper_limit);
+    pass.setFilterLimits(x_lower_limit, x_upper_limit);
+    pass.setFilterLimitsNegative (false);
+    pass.filter (path_throw_filtered_x);
+    pass.setInputCloud(path_throw_filtered_x.makeShared());
+    pass.setFilterFieldName("y");
+    pass.setFilterLimits(y_lower_limit, y_upper_limit);
+    pass.filter (path_throw_filtered_y);
     
-    if (out->points.size() < 5) 
+    pcl::RadiusOutlierRemoval<pcl::PointXYZ> outrem;
+    // build the filter
+    outrem.setInputCloud(path_throw_filtered_y.makeShared());
+    outrem.setRadiusSearch(0.02);
+    outrem.setMinNeighborsInRadius (2);
+    // apply filter
+    outrem.filter (out);
+    
+    if (out.points.size() < 5) 
     { 
       ROS_ERROR("Filtering: Too small number of points in the resulting PointCloud!"); 
       return false; 
@@ -218,7 +221,7 @@ public:
   
   void initLeg(const pcl::PointXYZ& p, std::vector<double>& in, std::vector<double>& out)
   {
-    Leg l;
+    Leg l(min_predictions, min_observations);
     if (!l.configure()) { ROS_ERROR("Configuring failed!"); return; }
     in.clear();
     in.push_back(p.x); in.push_back(p.y);
@@ -272,7 +275,7 @@ public:
   {
     ROS_INFO("PredictLeg  legs[i].getPredictions: %d, legs[i].getPeopleId: %d", legs[i].getPredictions(), legs[i].getPeopleId());
     printLegsInfo();
-    if (legs[i].getPredictions() > min_predictions)
+    if (legs[i].getPredictions() >= min_predictions)
     {
       removeLeg(i);
     }
@@ -302,7 +305,7 @@ public:
     int id = 0;
     for (Leg& l : legs)
     {
-      ROS_INFO("VIS peopleId: %d, pos: (%f, %f, %f), predictions: %d, observations: %d, hasPair: %d", 
+      ROS_INFO("VISlegs peopleId: %d, pos: (%f, %f, %f), predictions: %d, observations: %d, hasPair: %d", 
       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPos().z, l.getPredictions(), l.getObservations(), l.hasPair());
       cloud.points.push_back(l.getPos());
       ma.markers.push_back(getMarker(l.getPos().x, l.getPos().y, id));
@@ -389,8 +392,9 @@ public:
       if (cluster_centroids.points.size() == 0) { predictLeg(i); continue; }
       pcl::PointXYZ prediction, nearest;
       prediction = legs[i].computePrediction();
-      if (!findAndEraseMatch(prediction, cluster_centroids, nearest)) { predictLeg(i); }
-      updateLeg(legs[i], nearest, in, out);
+      double radius = (2 + legs[i].getPredictions()) * leg_radius;
+      if (!findAndEraseMatch(prediction, cluster_centroids, nearest, radius)) { predictLeg(i); }
+      else { updateLeg(legs[i], nearest, in, out); }
     }
 	
     findPeople();
@@ -408,7 +412,7 @@ public:
     ROS_INFO("findPeople");
     for (int i = 0; i < legs.size(); i++) 
     {
-      if (legs[i].getObservations() > min_observations && !legs[i].hasPair())
+      if (legs[i].getObservations() >= min_observations && !legs[i].hasPair())
       {
 	      findSecondLeg(i);
       }
@@ -459,6 +463,7 @@ public:
 	  int id = -1;
 	  bool isIdSet = false;
 	  isIdSet = legs[fst_leg].getPeopleId() != -1 || legs[snd_leg].getPeopleId() != -1;
+	  ROS_WARN("ids: %d, %d", legs[fst_leg].getPeopleId(), legs[snd_leg].getPeopleId());
 	  if (isIdSet && (legs[snd_leg].getPeopleId() ==  -1 || legs[snd_leg].getPeopleId() == legs[fst_leg].getPeopleId()) )
 	  {
 			id = legs[fst_leg].getPeopleId();
@@ -510,22 +515,30 @@ public:
   }
   
   
-  double calculateOvalAngle(double x1, double y1, double x2, double y2)
+  double calculateAndPubOval(double x1, double y1, double x2, double y2, int id)
   {
-		double x = (x1 + x2) / 2;
+	    double x = (x1 + x2) / 2;
 	    double y = (y1 + y2) / 2;
-	    double dist = sqrt(pow(x1 - x2, 2) + pow(y1 - y2, 2));
-	    double scale_x = dist + 2.5 * leg_radius;
-	    double scale_y = 3 * leg_radius;
-	    ROS_INFO("x1 - x2: %f", x1 - x2);
-	    double angle_x = abs(x1 - x2);
-	    double angle_y = abs(y1 - y2);
-	    ROS_INFO("angle_x: %f, angle_y: %f", angle_x, angle_y);
-	    return atan2( angle_y, angle_x ); 
-  }
-  
-  void calculateQuaternionAndPubOval(double angle)
-  {
+	    double dist = std::sqrt(std::pow(x1 - x2, 2) + std::pow(y1 - y2, 2));
+	    double scale_x = dist + 4 * leg_radius;
+	    double scale_y = 4 * leg_radius;
+// 	    ROS_INFO("x1 - x2: %f", std::abs(x1 - x2));
+	    
+	    double norm_1 = std::sqrt(std::pow(x1, 2) + std::pow(y1, 2));
+	    double norm_2 = std::sqrt(std::pow(x2, 2) + std::pow(y2, 2));
+	    double temp = (x1 * x2 + y1 * y2) / (norm_1 * norm_2);
+	    
+	    
+	    double diff_x = x1 - x2;
+// 	    if (x1 > x2) { diff_x = x2 - x1; }
+	    double diff_y = y1 - y2;
+// 	    ROS_INFO("angle_x: %f, angle_y: %f", diff_x, diff_y);
+	    
+	    double angle = std::atan2( diff_y, diff_x ); 
+// 	    ROS_WARN("diff_y: %f, diff_x : %f, angle: %f", diff_y, diff_x, angle);
+// 	    double angle = std::acos(temp);
+	    
+	    
 	    Eigen::Quaterniond q;
 	    q = Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ());
 	    double orientation_w = q.w();
@@ -533,40 +546,54 @@ public:
 	    double orientation_y = q.y();
 	    double orientation_z = q.z();
 
-	    
+	    /*
 	    ROS_INFO("Oval theta: %f, x: %f, y: %f, s_x: %f, s_y: %f, o_x: %f, o_y: %f, o_z: %f, o_w: %f, id: %d", 
-	      angle, x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
-	    pub_oval(x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
+	      angle, x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);*/
+	    pub_oval(x - 0.5 * leg_radius, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
   }
+ 
   
   void vis_people()
   {
     for (int i = 0; i < legs.size(); i++) 
     {
       int id = legs[i].getPeopleId();
+      if (id == -1) { continue; }
+      
+      
 	  
 	  // second leg is removed
-	  if (id != -1 && !legs[i].hasPair())
-	  {
-		  for (Leg& l : removed_legs)
-		  {
-			  if (l.getPeopleId() == id)
-			  {
-					double angle = calculateOvalAngle(legs[i].getPos().x, legs[i].getPos().y, l.getPos().x, l.getPos().y);
-					calculateQuaternionAndPubOval(angle);
-			  }
-		  }
-		  
-	  }
+	if (!legs[i].hasPair())
+	{
+		for (Leg& l : removed_legs)
+		{
+			if (l.getPeopleId() == id)
+			{
+			  calculateAndPubOval(legs[i].getPos().x, legs[i].getPos().y, l.getPos().x, l.getPos().y, id);
+					      
+			  ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f, %f), pos2removed: (%f, %f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)", 
+			  id, legs[i].getPos().x, legs[i].getPos().y, legs[i].getPos().z, l.getPos().x, l.getPos().y, l.getPos().z, legs[i].getPredictions(), l.getPredictions(), 
+				   legs[i].getObservations(), l.getObservations(), legs[i].hasPair(), l.hasPair());
+			}
+		}
+		
+	}
 	  
-      if (id != -1 && legs[i].hasPair())
+      if (legs[i].hasPair())
       {
 	for (int j = i + 1; j < legs.size(); j++)
 	{
-	  if (legs[i].getPeopleId() == id)
+	  if (legs[j].getPeopleId() == id)
 	  {
-	    double angle = calculateOvalAngle(legs[i].getPos().x, legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y);
-		calculateQuaternionAndPubOval(angle);
+	    calculateAndPubOval(legs[i].getPos().x, legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, id);
+		  
+		  
+	    ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f, %f), pos2: (%f, %f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)", 
+	    id, legs[i].getPos().x, legs[i].getPos().y, legs[i].getPos().z, 
+		     legs[j].getPos().x, legs[j].getPos().y, legs[j].getPos().z, 
+		     legs[i].getPredictions(), legs[j].getPredictions(), 
+		      legs[i].getObservations(), legs[j].getObservations(), 
+		     legs[i].hasPair(), legs[j].hasPair());
 	  }
 	}
       }
@@ -589,7 +616,7 @@ public:
     
     if (count > 1) 
     { 
-      //interesting more than on leg matched
+      //interesting more than one leg matched
     
     }
     
@@ -599,13 +626,13 @@ public:
     kdtree.nearestKSearch (searchPoint, K, pointsIdx, pointsSquaredDist);
     ROS_INFO("legs.size: %d, pointsIdx[0]: %d, indices[pointsIdx[0]]: %d, pointsSquaredDist: %f", 
       (int) legs.size(), pointsIdx[0], indices[pointsIdx[0]], pointsSquaredDist[0]);
-    if (pointsSquaredDist[0] <= radius_of_person) {
+    if (pointsSquaredDist[0] <= radius_of_person && pointsSquaredDist[0] >= 0.5 * leg_radius) {
       out_index = indices[pointsIdx[0]];
     }
     return out_index;  
   }
   
-  bool findAndEraseMatch(const pcl::PointXYZ& searchPoint, PointCloud& cloud, pcl::PointXYZ& out)
+  bool findAndEraseMatch(const pcl::PointXYZ& searchPoint, PointCloud& cloud, pcl::PointXYZ& out, double radius)
   {
     ROS_INFO("findAndEraseMatch");
     if (cloud.points.size() == 0) { return false; }
@@ -614,12 +641,19 @@ public:
     std::vector<int> pointIdxRadius;
     std::vector<float> pointsSquaredDistRadius;
     // radius search
-    int count = kdtree.radiusSearch (searchPoint, radius_of_person, pointIdxRadius, pointsSquaredDistRadius);
+    int count = kdtree.radiusSearch (searchPoint, radius, pointIdxRadius, pointsSquaredDistRadius);
     if (count == 0) { return false; }
+    if (count > 1) 
+    { 
+      //interesting more than one point matched
+    }
     int K = 1;
     std::vector<int> pointsIdx(K);
     std::vector<float> pointsSquaredDist(K);
     kdtree.nearestKSearch (searchPoint, K, pointsIdx, pointsSquaredDist);
+    if (pointsSquaredDist[0] > radius && pointsSquaredDist[0] < 0.5 * leg_radius) {
+      return false;
+    }
     out = cloud.points[pointsIdx[0]];
     cloud.points.erase(cloud.points.begin() + pointsIdx[0]);
     return true;  
@@ -1023,15 +1057,15 @@ public:
 
     pcl_conversions::toPCL(tfTransformedCloud, *pcl_pc2);
 
-//     PointCloud cloudXYZ, filteredCloudXYZ;
-    PointCloud::Ptr cloudXYZ (new PointCloud());
-    PointCloud::Ptr filteredCloudXYZ (new PointCloud());
-    pcl::fromPCLPointCloud2(*pcl_pc2, *cloudXYZ);
+    PointCloud cloudXYZ, filteredCloudXYZ;
+//     PointCloud::Ptr cloudXYZ (new PointCloud());
+//     PointCloud::Ptr filteredCloudXYZ (new PointCloud());
+    pcl::fromPCLPointCloud2(*pcl_pc2, cloudXYZ);
 
     if (!this->filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { return; }
     
     PointCloud cluster_centroids;
-    clustering(*filteredCloudXYZ, cluster_centroids);
+    clustering(filteredCloudXYZ, cluster_centroids);
     matchLegCandidates(cluster_centroids);
     visLegs(cluster_centroids);
     vis_people();

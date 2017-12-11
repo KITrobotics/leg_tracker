@@ -15,9 +15,11 @@ private:
   int predictions;
   int observations;
   bool hasPair_;
+  int min_predictions;
+  int min_observations;
 
 public:
-  Leg() {}
+  Leg(int min_preds, int min_obs) : min_predictions(min_preds), min_observations(min_obs) {}
   bool configure()
   {
     peopleId = -1;
@@ -43,7 +45,7 @@ public:
     std::vector<double> prediction;
     filter->predict(prediction);
     if (prediction.size() >= 2) { pos.x = prediction[0]; pos.y = prediction[1]; }
-    predictions++;
+    if (predictions < min_predictions) { predictions++; }
     observations = 0;
   }
   
@@ -54,7 +56,7 @@ public:
     pos.x = out[0];
     pos.y = out[1];
     predictions = 0;
-    observations++;
+    if (observations < min_observations) { observations++; }
   }
   
   int getPredictions()

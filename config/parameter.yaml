@@ -9,5 +9,5 @@ circle_fitting: centroid # ransac or centroid
 leg_radius: 0.1
 min_observations: 4
 radius_of_person: 1.0
-min_predictions: 10
+min_predictions: 7
 z_coordinate: 0.178
