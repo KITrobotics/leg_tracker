@@ -53,6 +53,7 @@
 
 
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
+//typedef std::map<int, std::pair<pcl::PointXYZ, pcl::PointXYZ> > PeopleMap;
 
 const int cluster_size = 2;
 
@@ -90,6 +91,8 @@ private:
   int id_counter;
   double z_coordinate;
   
+  //PeopleMap persons;
+  std::vector<Leg> removed_legs;
   
   
   std::vector<Leg> legs;
@@ -252,7 +255,11 @@ public:
 	      }
       }
     }
-    if (legs[index].getPeopleId() != -1) { legs[index].setPeopleId(-1); }
+    if (legs[index].getPeopleId() != -1) 
+	{ 
+		//legs[index].setPeopleId(-1); 
+		removed_legs.push_back(legs[index]);
+	}
     legs.erase(legs.begin() + index);
     ROS_INFO("AFTER removeLeg");
     printLegsInfo();
@@ -430,15 +437,68 @@ public:
 	if (snd_leg == -1) { ROS_INFO("Could not find second leg!"); return; }
 	
 	setPeopleId(fst_leg, snd_leg);
+	
   }  
+  
+  
+  void eraseRemovedLeg(int id)
+  {
+	  for (std::vector<Leg>::iterator it = removed_legs.begin(); it != removed_legs.end(); it++)
+	  {
+		  if (it->getPeopleId() == id)
+		  {
+			  removed_legs.erase(it);
+			  return;
+		  }
+	  }
+  }
   
   void setPeopleId(int fst_leg, int snd_leg)
   {
-	  int id = id_counter++;
+	  
+	  int id = -1;
+	  bool isIdSet = false;
+	  isIdSet = legs[fst_leg].getPeopleId() != -1 || legs[snd_leg].getPeopleId() != -1;
+	  if (isIdSet && (legs[snd_leg].getPeopleId() ==  -1 || legs[snd_leg].getPeopleId() == legs[fst_leg].getPeopleId()) )
+	  {
+			id = legs[fst_leg].getPeopleId();
+			eraseRemovedLeg(id);
+	  } 
+	  else if (isIdSet && legs[fst_leg].getPeopleId() ==  -1) 
+	  {
+			id = legs[snd_leg].getPeopleId();
+			eraseRemovedLeg(id);
+	  }	
+	  else if (isIdSet && legs[snd_leg].getPeopleId() != legs[fst_leg].getPeopleId())
+	  {
+		  // legs from not same people
+		  //return;
+			id = legs[fst_leg].getPeopleId() < legs[snd_leg].getPeopleId() ? 
+				legs[fst_leg].getPeopleId() : legs[snd_leg].getPeopleId();
+				
+			eraseRemovedLeg(id);
+			eraseRemovedLeg(legs[snd_leg].getPeopleId());
+	  }
+	  else	  
+	  {
+		  id = id_counter++;
+	  }
+	  
+	  
+	  
+	  
 	  legs[fst_leg].setPeopleId(id);
 	  legs[snd_leg].setPeopleId(id);
 	  legs[fst_leg].setHasPair(true);
 	  legs[snd_leg].setHasPair(true);
+	  //std::pair<PeopleMap::iterator, bool> ret;
+	  //std::pair <pcl::PointXYZ, pcl::PointXYZ> leg_points = std::make_pair(legs[fst_leg].getPos(), legs[fst_leg].getPos());
+	  //ret = persons.insert ( std::pair<int, std::pair <pcl::PointXYZ, pcl::PointXYZ> >(id, leg_points) );
+	  //if (ret.second==false) {
+		//std::cout << "element 'z' already existed";
+		//std::cout << " with a value of " << ret.first->second << '\n';
+	  //}
+	  //persons.add(id, std::make_pair(legs[fst_leg].getPos(), legs[fst_leg].getPos()));
   }
   
   void printCloudPoints(const PointCloud& cloud)
@@ -449,29 +509,25 @@ public:
     }
   }
   
-  void vis_people()
+  
+  double calculateOvalAngle(double x1, double y1, double x2, double y2)
   {
-    for (int i = 0; i < legs.size(); i++) 
-    {
-      int id = legs[i].getPeopleId();
-      if (id != -1 && legs[i].hasPair())
-      {
-	for (int j = i + 1; j < legs.size(); j++)
-	{
-	  if (legs[i].getPeopleId() == id)
-	  {
-	    double x = (legs[i].getPos().x + legs[j].getPos().x) / 2;
-	    double y = (legs[i].getPos().y + legs[j].getPos().y) / 2;
-	    double dist = sqrt(pow(legs[i].getPos().x - legs[j].getPos().x, 2) + pow(legs[i].getPos().y - legs[j].getPos().y, 2));
+		double x = (x1 + x2) / 2;
+	    double y = (y1 + y2) / 2;
+	    double dist = sqrt(pow(x1 - x2, 2) + pow(y1 - y2, 2));
 	    double scale_x = dist + 2.5 * leg_radius;
 	    double scale_y = 3 * leg_radius;
-	    ROS_INFO("legs[i].getPos().x - legs[j].getPos().x: %f", legs[i].getPos().x - legs[j].getPos().x);
-	    double angle_x = abs(legs[i].getPos().x - legs[j].getPos().x);
-	    double angle_y = abs(legs[i].getPos().y - legs[j].getPos().y);
+	    ROS_INFO("x1 - x2: %f", x1 - x2);
+	    double angle_x = abs(x1 - x2);
+	    double angle_y = abs(y1 - y2);
 	    ROS_INFO("angle_x: %f, angle_y: %f", angle_x, angle_y);
-	    double angle = atan2( angle_y, angle_x ); 
+	    return atan2( angle_y, angle_x ); 
+  }
+  
+  void calculateQuaternionAndPubOval(double angle)
+  {
 	    Eigen::Quaterniond q;
-	    q = Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitZ());
+	    q = Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ());
 	    double orientation_w = q.w();
 	    double orientation_x = q.x();
 	    double orientation_y = q.y();
@@ -481,6 +537,36 @@ public:
 	    ROS_INFO("Oval theta: %f, x: %f, y: %f, s_x: %f, s_y: %f, o_x: %f, o_y: %f, o_z: %f, o_w: %f, id: %d", 
 	      angle, x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
 	    pub_oval(x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
+  }
+  
+  void vis_people()
+  {
+    for (int i = 0; i < legs.size(); i++) 
+    {
+      int id = legs[i].getPeopleId();
+	  
+	  // second leg is removed
+	  if (id != -1 && !legs[i].hasPair())
+	  {
+		  for (Leg& l : removed_legs)
+		  {
+			  if (l.getPeopleId() == id)
+			  {
+					double angle = calculateOvalAngle(legs[i].getPos().x, legs[i].getPos().y, l.getPos().x, l.getPos().y);
+					calculateQuaternionAndPubOval(angle);
+			  }
+		  }
+		  
+	  }
+	  
+      if (id != -1 && legs[i].hasPair())
+      {
+	for (int j = i + 1; j < legs.size(); j++)
+	{
+	  if (legs[i].getPeopleId() == id)
+	  {
+	    double angle = calculateOvalAngle(legs[i].getPos().x, legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y);
+		calculateQuaternionAndPubOval(angle);
 	  }
 	}
       }
