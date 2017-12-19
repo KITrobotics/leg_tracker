@@ -95,9 +95,8 @@ private:
   
   //PeopleMap persons;
   std::vector<Leg> removed_legs;
-  
-  
-  std::vector<Leg> legs;
+  std::vector<Leg> temporary_legs;
+  std::vector<std::pair<Leg, Leg> > persons;
   
 //   iirob_filters::KalmanFilterParameters params_;
 
@@ -154,13 +153,14 @@ public:
   }
   
   
-  void laserScanToPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, sensor_msgs::PointCloud2& cloud)
+  bool laserScanToPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, sensor_msgs::PointCloud2& cloud)
   {
-    if (!scan) { ROS_ERROR("Laser scan pointer was not set!"); }
+    if (!scan) { ROS_INFO("Laser scan pointer was not set!"); return false; }
     projector_.projectLaser(*scan, cloud);
+    return true;
   }
   
-  void tfTransformOfPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, 
+  bool tfTransformOfPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, 
 				sensor_msgs::PointCloud2& from, sensor_msgs::PointCloud2& to)
   {
     geometry_msgs::TransformStamped transformStamped;
@@ -170,16 +170,17 @@ public:
     catch (tf2::TransformException &ex) {
       ROS_WARN("%s",ex.what());
       ros::Duration(1.0).sleep();
-      return;
+      return false;
     }
     tf2::doTransform(from, to, transformStamped);
+    return true;
   }
   
   bool filterPCLPointCloud(const PointCloud& in, PointCloud& out)
   {
     if (in.points.size() < 5) 
     { 
-      ROS_ERROR("Filtering: Too small number of points in the input PointCloud!"); 
+      ROS_INFO("Filtering: Too small number of points in the input PointCloud!"); 
       return false; 
     }
     
@@ -213,19 +214,16 @@ public:
     
     if (out.points.size() < 5) 
     { 
-      ROS_ERROR("Filtering: Too small number of points in the resulting PointCloud!"); 
+      ROS_INFO("Filtering: Too small number of points in the resulting PointCloud!"); 
       return false; 
     }
     return true;
   }
   
-  void initLeg(const pcl::PointXYZ& p, std::vector<double>& in, std::vector<double>& out)
+  void initLeg(const pcl::PointXYZ& p)
   {
     Leg l(min_predictions, min_observations);
-    if (!l.configure()) { ROS_ERROR("Configuring failed!"); return; }
-    in.clear();
-    in.push_back(p.x); in.push_back(p.y);
-    l.update(in, out);
+    if (!l.configure(p)) { ROS_ERROR("Configuring failed!"); return; }
     legs.push_back(l);
     ROS_INFO("AFTER initLeg");
     printLegsInfo();
@@ -382,7 +380,7 @@ public:
     
       for (pcl::PointXYZ p : cluster_centroids.points)
       {
-		initLeg(p, in, out);
+		initLeg(p);
       }
       return;
     }
@@ -401,7 +399,7 @@ public:
     
     for (pcl::PointXYZ p : cluster_centroids.points)
     {
-      initLeg(p, in, out);
+      initLeg(p);
     }
     
     
@@ -520,8 +518,8 @@ public:
 	    double x = (x1 + x2) / 2;
 	    double y = (y1 + y2) / 2;
 	    double dist = std::sqrt(std::pow(x1 - x2, 2) + std::pow(y1 - y2, 2));
-	    double scale_x = dist + 4 * leg_radius;
-	    double scale_y = 4 * leg_radius;
+	    double scale_x = dist + 5 * leg_radius;
+	    double scale_y = 5 * leg_radius;
 // 	    ROS_INFO("x1 - x2: %f", std::abs(x1 - x2));
 	    
 	    double norm_1 = std::sqrt(std::pow(x1, 2) + std::pow(y1, 2));
@@ -549,7 +547,7 @@ public:
 	    /*
 	    ROS_INFO("Oval theta: %f, x: %f, y: %f, s_x: %f, s_y: %f, o_x: %f, o_y: %f, o_z: %f, o_w: %f, id: %d", 
 	      angle, x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);*/
-	    pub_oval(x - 0.5 * leg_radius, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
+	    pub_oval(x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
   }
  
   
@@ -616,8 +614,9 @@ public:
     
     if (count > 1) 
     { 
-      //interesting more than one leg matched
-    
+      ROS_INFO("mahalanobis");
+      // interesting more than one leg matched
+      // use mahalanobis distance
     }
     
     int K = 1;
@@ -668,10 +667,10 @@ public:
     }
   }
   
-  void clustering(const PointCloud& cloud, PointCloud& cluster_centroids)
+  bool clustering(const PointCloud& cloud, PointCloud& cluster_centroids)
   {
     
-    if (cloud.points.size() < 4) { return; }
+    if (cloud.points.size() < 4) { ROS_INFO("Clustering: Too small number of points!"); return false; }
 //     pcl::PCDWriter writer;
 
     pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
@@ -720,7 +719,7 @@ public:
 //     pcl_cloud_publisher.publish(cluster_centroids);
 
  //   std::cout << "clusters: " << j << " datas." << std::endl;	
-
+    return true;
   }
   
   void sortPointCloudToLeftAndRight(const PointCloud& input_cloud, PointCloud::Ptr left, PointCloud::Ptr right)
@@ -759,7 +758,7 @@ public:
     
     if (centers.rows != 2)
     {
-      ROS_ERROR("KMeans: The number of rows is not valid!");
+      ROS_INFO("KMeans: The number of rows is not valid!");
       return;
     }
 
@@ -831,7 +830,7 @@ public:
     }
     catch (...)
     {
-      ROS_ERROR("Ransac: Computing model has failed!");
+      ROS_INFO("Ransac: Computing model has failed!");
       return centers;
     }
 	    
@@ -844,7 +843,7 @@ public:
     ransac.getInliers(inliers);
     if (inliers.size() < 3)
     {
-      ROS_ERROR("The number of inliers is too small!");
+      ROS_INFO("The number of inliers is too small!");
       return centers;
     }
     
@@ -1047,9 +1046,9 @@ public:
   {
     sensor_msgs::PointCloud2 cloudFromScan, tfTransformedCloud;
     
-    laserScanToPointCloud2(scan, cloudFromScan);
+    if (!laserScanToPointCloud2(scan, cloudFromScan)) { return; }
    
-    tfTransformOfPointCloud2(scan, cloudFromScan, tfTransformedCloud);
+    if (!tfTransformOfPointCloud2(scan, cloudFromScan, tfTransformedCloud)) { return; }
     
     sensor_msgs_point_cloud_publisher.publish(tfTransformedCloud); 
     
@@ -1058,14 +1057,12 @@ public:
     pcl_conversions::toPCL(tfTransformedCloud, *pcl_pc2);
 
     PointCloud cloudXYZ, filteredCloudXYZ;
-//     PointCloud::Ptr cloudXYZ (new PointCloud());
-//     PointCloud::Ptr filteredCloudXYZ (new PointCloud());
     pcl::fromPCLPointCloud2(*pcl_pc2, cloudXYZ);
 
     if (!this->filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { return; }
     
     PointCloud cluster_centroids;
-    clustering(filteredCloudXYZ, cluster_centroids);
+    if (!clustering(filteredCloudXYZ, cluster_centroids)) { return; }
     matchLegCandidates(cluster_centroids);
     visLegs(cluster_centroids);
     vis_people();
@@ -1213,6 +1210,8 @@ public:
 
   }
   
+protected:
+    void ROS_ERROR ( const char* arg1 );
 };
 
 

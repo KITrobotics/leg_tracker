@@ -17,17 +17,26 @@ private:
   bool hasPair_;
   int min_predictions;
   int min_observations;
+//   bool isRemoved;
 
 public:
   Leg(int min_preds, int min_obs) : min_predictions(min_preds), min_observations(min_obs) {}
-  bool configure()
+  bool configure(pcl::PointXYZ p)
   {
     peopleId = -1;
-    pos.x = pos.y = pos.z = 0.0;
-    predictions = observations = 0;
+    pos = p;
     hasPair_ = false;
+    std::vector<double> in;
+    
+    // position
+    in.push_back(p.x); in.push_back(p.y);
+    // velocity
+    in.push_back(0.0); in.push_back(0.0);
+    // acceleration
+    in.push_back(0.0); in.push_back(0.0);
+    
     filter = new iirob_filters::MultiChannelKalmanFilter<double>();
-    bool result = filter->configure();
+    bool result = filter->configure(in);
     if (!result) { ROS_ERROR("Configure of filter has failed!"); }
     return result;
   }
