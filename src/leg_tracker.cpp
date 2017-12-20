@@ -47,6 +47,10 @@
  * N2 ~ continue tracking of already tracked people which were occluded
  * N1 = 0.7 and N2 = 1.2
  * 
+ * Invarianten erstellen: 
+ * if scan is not valid or scan does not have enough points
+ * 
+ * 
  */
 
 
