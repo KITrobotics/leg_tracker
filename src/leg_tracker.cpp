@@ -48,7 +48,7 @@
  * N1 = 0.7 and N2 = 1.2
  * 
  * Invarianten erstellen: 
- * if scan is not valid or scan does not have enough points
+ * if scan is not valid or scan does not have enough points -> calculate predictions
  * 
  * 
  */
@@ -99,8 +99,8 @@ private:
   
   //PeopleMap persons;
   std::vector<Leg> removed_legs;
-  std::vector<Leg> temporary_legs;
-  std::vector<std::pair<Leg, Leg> > persons;
+  std::vector<Leg> legs;
+//   std::vector<std::pair<Leg, Leg> > persons;
   
 //   iirob_filters::KalmanFilterParameters params_;
 
@@ -367,6 +367,7 @@ public:
     ROS_INFO("predictions: %d, cluster_centroids: %d", (int) predictions.points.size(), (int) cluster_centroids.points.size());
     if (predictions.points.size() == 0 && cluster_centroids.points.size() == 0) { return; }
     
+    // there are no measurements for legs
     if (cluster_centroids.points.size() == 0)
     {
       for (int i = 0; i < legs.size(); i++)
@@ -379,6 +380,7 @@ public:
     
     std::vector<double> in, out;
     
+    // there are no observed legs
     if (predictions.points.size() == 0)
     { 
     
@@ -389,6 +391,7 @@ public:
       return;
     }
     
+    // if there is matched measurement then update else predict
     for (int i = 0; i < legs.size(); i++) 
     {
       if (cluster_centroids.points.size() == 0) { predictLeg(i); continue; }
@@ -399,8 +402,10 @@ public:
       else { updateLeg(legs[i], nearest, in, out); }
     }
 	
+    // if there is enough measurements for legs try to find people
     findPeople();
     
+    // save new measurements of legs
     for (pcl::PointXYZ p : cluster_centroids.points)
     {
       initLeg(p);
@@ -437,7 +442,7 @@ public:
 		indices.push_back(i);
 	}
 	
-	if (potential_legs.size() == 0) { return; }
+	if (potential_legs.size() == 0) { ROS_INFO("There is no potential second leg!"); return; }
 	
 	int snd_leg = findMatch(legs[fst_leg].getPos(), potential_legs, indices);
 	if (snd_leg == -1) { ROS_INFO("Could not find second leg!"); return; }
@@ -446,6 +451,16 @@ public:
 	
   }  
   
+  void eraseRemovedLegsWithoutId()
+  {
+	  for (std::vector<Leg>::iterator it = removed_legs.begin(); it != removed_legs.end(); it++)
+	  {
+		  if (it->getPeopleId() == -1)
+		  {
+			  removed_legs.erase(it);
+		  }
+	  }
+  }
   
   void eraseRemovedLeg(int id)
   {
@@ -614,13 +629,13 @@ public:
     std::vector<float> pointsSquaredDistRadius;
     int count = kdtree.radiusSearch (searchPoint, radius_of_person, pointIdxRadius, pointsSquaredDistRadius);
 	
-    if (count == 0) { return -1; }
+    if (count == 0) { return out_index; }
     
     if (count > 1) 
     { 
       ROS_INFO("mahalanobis");
       // interesting more than one leg matched
-      // use mahalanobis distance
+      // use mahalanobis distance and some other data association methods  
     }
     
     int K = 1;
@@ -1048,6 +1063,11 @@ public:
   
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
+//     pub_square(0.0, 0.0);
+//     pub_line((x_upper_limit - x_lower_limit) / 2, y_lower_limit);
+//     pub_line((x_upper_limit - x_lower_limit) / 2, y_upper_limit);
+//     pub_line(x_lower_limit, (y_upper_limit - y_lower_limit) / 2);
+//     pub_line(x_upper_limit, (y_upper_limit - y_lower_limit) / 2);
     sensor_msgs::PointCloud2 cloudFromScan, tfTransformedCloud;
     
     if (!laserScanToPointCloud2(scan, cloudFromScan)) { return; }
@@ -1068,8 +1088,10 @@ public:
     PointCloud cluster_centroids;
     if (!clustering(filteredCloudXYZ, cluster_centroids)) { return; }
     matchLegCandidates(cluster_centroids);
+    eraseRemovedLegsWithoutId();
     visLegs(cluster_centroids);
     vis_people();
+    
     
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
     
@@ -1120,6 +1142,70 @@ public:
 //     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
     vis_pub.publish( marker );
 
+  }
+  
+  void pub_line(double x, double y) 
+  {
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = transform_link;
+    marker.header.stamp = ros::Time();
+    marker.ns = nh_.getNamespace();
+//     marker.id = id;
+    marker.type = visualization_msgs::Marker::LINE_STRIP;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.position.x = x;
+    marker.pose.position.y = y;
+    marker.pose.position.z = 0.0;
+//     marker.pose.orientation.x = orientation_x;
+//     marker.pose.orientation.y = orientation_y;
+//     marker.pose.orientation.z = orientation_z;
+//     marker.pose.orientation.w = orientation_w;
+    marker.scale.x = x_upper_limit - x_lower_limit;
+//     marker.scale.y = y_upper_limit - y_lower_limit;
+//     marker.scale.z = 0;
+    marker.color.a = 1.0; // Don't forget to set the alpha!
+    marker.color.g = 1.0; 
+//     if (id == 0)
+//       marker.color.r = 1.0; 
+//     if (id == 2)
+//       marker.color.g = 1.0; 
+//     if (id == 1)
+//       marker.color.b = 1.0;
+    //only if using a MESH_RESOURCE marker type:
+//     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
+    vis_pub.publish( marker );
+  }
+  
+  void pub_square(double x, double y) 
+  {
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = transform_link;
+    marker.header.stamp = ros::Time();
+    marker.ns = nh_.getNamespace();
+//     marker.id = id;
+    marker.type = visualization_msgs::Marker::CUBE;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.position.x = x;
+    marker.pose.position.y = y;
+    marker.pose.position.z = 0.0;
+//     marker.pose.orientation.x = orientation_x;
+//     marker.pose.orientation.y = orientation_y;
+//     marker.pose.orientation.z = orientation_z;
+//     marker.pose.orientation.w = orientation_w;
+    marker.scale.x = x_upper_limit - x_lower_limit;
+    marker.scale.y = y_upper_limit - y_lower_limit;
+//     marker.scale.z = 0;
+    marker.color.a = 1.0; // Don't forget to set the alpha!
+    marker.color.g = 1.0; 
+//     if (id == 0)
+//       marker.color.r = 1.0; 
+//     if (id == 2)
+//       marker.color.g = 1.0; 
+//     if (id == 1)
+//       marker.color.b = 1.0;
+    //only if using a MESH_RESOURCE marker type:
+//     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
+    vis_pub.publish( marker );
   }
   
   void pub_oval(double x, double y, double scale_x, double scale_y, double orientation_x, 
@@ -1214,8 +1300,6 @@ public:
 
   }
   
-protected:
-    void ROS_ERROR ( const char* arg1 );
 };
 
 
