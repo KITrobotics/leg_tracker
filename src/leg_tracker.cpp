@@ -95,6 +95,8 @@ private:
   double radius_of_person;
   int id_counter;
   double z_coordinate;
+  double vel_stance_threshold;
+  double vel_swing_threshold;
 
 
 
@@ -138,6 +140,8 @@ public:
     nh_.param("min_predictions", min_predictions, 7);
     nh_.param("radius_of_person", radius_of_person, 1.0);
     nh_.param("z_coordinate", z_coordinate, 0.178);
+    nh_.param("vel_stance_threshold", vel_stance_threshold, 0.47);
+    nh_.param("vel_swing_threshold", vel_swing_threshold, 0.93);
 
     legs_gathered = id_counter = 0;
 
@@ -156,6 +160,65 @@ public:
       ROS_ERROR("Parameter %s not set, shutting down node...", parameter.c_str());
       nh_.shutdown();
   }
+
+  double calculateNorm(Point p)
+  {
+    return sqrt(pow(p.x, 2) + pow(p.y, 2));
+  }
+
+  int calculateGaitPhase(Point pos_left, Point pos_right, Point vel_left, Point vel_right)
+  {
+    double velocity_left = calculateNorm(vel_left);
+    double velocity_right = calculateNorm(vel_right);
+
+    bool isRightInStance, isLeftInStance, isRightInSwingPhase, isLeftInSwingPhase;
+
+    if (velocity_right < velocity_left || velocity_right < vel_stance_threshold) {
+      isRightInStance = true;
+    }
+    if (velocity_right > velocity_left || velocity_right > vel_swing_threshold) {
+      isRightInSwingPhase = true;
+    }
+    if (velocity_left < velocity_right || velocity_left < vel_stance_threshold) {
+      isRightInStance = true;
+    }
+    if (velocity_left > velocity_right || velocity_left > vel_swing_threshold) {
+      isRightInSwingPhase = true;
+    }
+    // phase 0
+    if (isRightInStance && isLeftInStance) { return 0; }
+
+    double inner_pos_vel_product = (pos_left - pos_right) * velocity_left;
+    // phase 1
+    if (isLeftInSwingPhase && isRightInStance && inner_pos_vel_product > 0) { return 1; }
+    // phase 2
+    if (isLeftInSwingPhase && isRightInStance && inner_pos_vel_product <= 0) { return 2; }
+
+    inner_pos_vel_product = (pos_right - pos_left) * velocity_right;
+    // phase 3
+    if (isRightInSwingPhase && isLeftInStance && inner_pos_vel_product > 0) { return 3; }
+    // phase 4
+    if (isRightInSwingPhase && isLeftInStance && inner_pos_vel_product <= 0) { return 4; }
+
+    // phase 5
+    return 5;
+  }
+
+  void considerGaitPhase() {
+
+        /*
+
+        unlikely:
+
+        Phase 0 to Phase 5,
+        Phase 1 to Phases 0, 3, 4 and 5,
+        Phase 2 to Phases 1, 4 and 5,
+        Phase 3 to Phases 0, 1, 2 and 5,
+        Phase 4 to Phases 2, 3 and 5.
+
+        */
+  }
+
 
 
   bool laserScanToPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, sensor_msgs::PointCloud2& cloud)
