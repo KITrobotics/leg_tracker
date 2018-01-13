@@ -39,6 +39,7 @@
 #include <leg.h>
 #include <math.h>
 #include <Eigen/Geometry>
+#include <Eigen/Eigenvalues>
 
 
 /*
@@ -220,6 +221,32 @@ public:
   }
 
 
+  void pubCovarianceAsEllipse(const double meanX, const double meanY, const MatrixXd& S, const int id)
+  {
+
+    SelfAdjointEigenSolver<MatrixXd> solver(S);
+    double l1 = solver.eigenvalues().x();
+    double l2 = solver.eigenvalues().y();
+    Vector2d e1 = solver.eigenvectors().col(0);
+    Vector2d e2 = solver.eigenvectors().col(1);
+
+    double scale95 = sqrt(5.991);
+    double R1 = scale95 * sqrt(l1);
+    double R2 = scale95 * sqrt(l2);
+    double tilt = atan2(e2.y(), e2.x());
+
+
+    Eigen::Quaterniond q;
+    q = Eigen::AngleAxisd(tilt, Eigen::Vector3d::UnitZ());
+    double orientation_w = q.w();
+    double orientation_x = q.x();
+    double orientation_y = q.y();
+    double orientation_z = q.z();
+
+    pub_oval(meanX, meanY, R1, R2, orientation_x, orientation_y, orientation_z, orientation_w, id);
+  }
+
+
 
   bool laserScanToPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, sensor_msgs::PointCloud2& cloud)
   {
@@ -263,7 +290,6 @@ public:
     pcl::PassThrough<Point> pass;
     pass.setInputCloud(in.makeShared());
     pass.setFilterFieldName("x");
-    ROS_WARN("x_lower_limit: %f, x_upper_limit: %f", x_lower_limit, x_upper_limit);
     pass.setFilterLimits(x_lower_limit, x_upper_limit);
     pass.setFilterLimitsNegative (false);
     pass.filter (path_throw_filtered_x);
@@ -273,6 +299,9 @@ public:
     pass.filter (path_throw_filtered_y);
 
     pcl::RadiusOutlierRemoval<Point> outrem;
+
+
+
     // build the filter
     outrem.setInputCloud(path_throw_filtered_y.makeShared());
     outrem.setRadiusSearch(0.02);
@@ -429,13 +458,14 @@ public:
     predictions.header = cluster_centroids.header;
     computeKalmanFilterPredictions(predictions);
     ROS_INFO("predictions: %d, cluster_centroids: %d", (int) predictions.points.size(), (int) cluster_centroids.points.size());
-    if (predictions.points.size() == 0 && cluster_centroids.points.size() == 0) { return; }
+    if (predictions.points.size() == 0 && cluster_centroids.points.size() == 0) { ROS_INFO("There are no leg candidates and no predictions!"); return; }
 
     if (cluster_centroids.points.size() == 0)
     {
+      ROS_INFO("There are only predictions!");
       for (int i = 0; i < legs.size(); i++)
       {
-		predictLeg(i);
+		      predictLeg(i);
       }
       return;
     }
@@ -445,16 +475,17 @@ public:
 
     if (predictions.points.size() == 0)
     {
-
+      ROS_INFO("There are only new leg candidates!");
       for (Point p : cluster_centroids.points)
       {
-		initLeg(p);
+		      initLeg(p);
       }
       return;
     }
 
     for (int i = 0; i < legs.size(); i++)
     {
+      ROS_DEBUG("Observation to track data association!");
       if (cluster_centroids.points.size() == 0) { predictLeg(i); continue; }
       Point prediction, nearest;
       prediction = legs[i].computePrediction();
@@ -581,7 +612,7 @@ public:
   }
 
 
-  double calculateAndPubOval(double x1, double y1, double x2, double y2, int id)
+  void calculateAndPubOval(double x1, double y1, double x2, double y2, int id)
   {
 	    double x = (x1 + x2) / 2;
 	    double y = (y1 + y2) / 2;
@@ -1127,11 +1158,17 @@ public:
     PointCloud cloudXYZ, filteredCloudXYZ;
     pcl::fromPCLPointCloud2(*pcl_pc2, cloudXYZ);
 
-    if (!this->filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { return; }
+    if (!filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { return; }
 
     PointCloud cluster_centroids;
+
+    // clustering
     if (!clustering(filteredCloudXYZ, cluster_centroids)) { return; }
+
+    // data association
     matchLegCandidates(cluster_centroids);
+
+
     visLegs(cluster_centroids);
     vis_people();
 
