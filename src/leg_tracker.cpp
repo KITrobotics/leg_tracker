@@ -40,6 +40,7 @@
 #include <math.h>
 #include <Eigen/Geometry>
 #include <AuctionAlgorithm.h>
+#include <Eigen/Eigenvalues>
 
 
 /*
@@ -298,6 +299,32 @@ public:
   }
 
 
+  void pubCovarianceAsEllipse(const double meanX, const double meanY, const Eigen::MatrixXd& S, const int id)
+  {
+
+    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(S);
+    double l1 = solver.eigenvalues().x();
+    double l2 = solver.eigenvalues().y();
+    Eigen::VectorXd e1 = solver.eigenvectors().col(0);
+    Eigen::VectorXd e2 = solver.eigenvectors().col(1);
+
+    double scale95 = sqrt(5.991);
+    double R1 = scale95 * sqrt(l1);
+    double R2 = scale95 * sqrt(l2);
+    double tilt = atan2(e2.y(), e2.x());
+
+
+    Eigen::Quaterniond q;
+    q = Eigen::AngleAxisd(tilt, Eigen::Vector3d::UnitZ());
+    double orientation_w = q.w();
+    double orientation_x = q.x();
+    double orientation_y = q.y();
+    double orientation_z = q.z();
+
+    pub_oval(meanX, meanY, R1, R2, orientation_x, orientation_y, orientation_z, orientation_w, id);
+  }
+
+
 
   bool laserScanToPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, sensor_msgs::PointCloud2& cloud)
   {
@@ -360,6 +387,9 @@ public:
     }
 
     pcl::RadiusOutlierRemoval<Point> outrem;
+
+
+
     // build the filter
     outrem.setInputCloud(pass_through_filtered_y.makeShared());
     outrem.setRadiusSearch(0.02);
@@ -517,15 +547,16 @@ public:
     predictions.header = cluster_centroids.header;
     computeKalmanFilterPredictions(predictions);
     ROS_INFO("predictions: %d, cluster_centroids: %d", (int) predictions.points.size(), (int) cluster_centroids.points.size());
-    if (predictions.points.size() == 0 && cluster_centroids.points.size() == 0) { return; }
+    if (predictions.points.size() == 0 && cluster_centroids.points.size() == 0) { ROS_INFO("There are no leg candidates and no predictions!"); return; }
 
     
     // there are no measurements for legs
     if (cluster_centroids.points.size() == 0)
     {
+      ROS_INFO("There are only predictions!");
       for (int i = 0; i < legs.size(); i++)
       {
-		predictLeg(i);
+		      predictLeg(i);
       }
       return;
     }
@@ -533,10 +564,10 @@ public:
     // there are no observed legs
     if (predictions.points.size() == 0)
     {
-
+      ROS_INFO("There are only new leg candidates!");
       for (Point p : cluster_centroids.points)
       {
-		initLeg(p);
+		      initLeg(p);
       }
       return;
     }
@@ -556,7 +587,6 @@ public:
 //       double radius = (2 + legs[i].getPredictions()) * leg_radius;
 //       if (!findAndEraseMatch(prediction, cluster_centroids, nearest, radius)) { predictLeg(i); }
 //       else { updateLeg(legs[i], nearest); }
-    
     
     
       // GNN
@@ -617,6 +647,8 @@ public:
 //     marker_array_publisher.publish(ma);
 	
     // if there is enough measurements for legs try to find people
+      
+
     findPeople();
     
     // save new measurements of legs
@@ -746,7 +778,7 @@ public:
   }
 
 
-  double calculateAndPubOval(double x1, double y1, double x2, double y2, int id)
+  void calculateAndPubOval(double x1, double y1, double x2, double y2, int id)
   {
 	    double x = (x1 + x2) / 2;
 	    double y = (y1 + y2) / 2;
@@ -1297,17 +1329,24 @@ public:
     PointCloud cloudXYZ, filteredCloudXYZ;
     pcl::fromPCLPointCloud2(*pcl_pc2, cloudXYZ);
 
-    if (!this->filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { return; }
+    if (!filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { return; }
 
     PointCloud cluster_centroids;
+
+    // clustering
     if (!clustering(filteredCloudXYZ, cluster_centroids)) { return; }
+
     
     
-    matchLegCandidates(cluster_centroids); 
+    // data association
+    matchLegCandidates(cluster_centroids);
     eraseRemovedLegsWithoutId();
     
 //     GNN(cluster_centroids); 
     
+
+
+
     visLegs(cluster_centroids);
     vis_people();
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
