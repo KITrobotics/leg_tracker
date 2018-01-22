@@ -1,39 +1,36 @@
 
 #include <iirob_filters/kalman_filter.h>
-#include <pcl/point_types.h>
+#include <leg.h>
 
-
-
-typedef pcl::PointXYZ Point;
 typedef iirob_filters::MultiChannelKalmanFilter<double> KalmanFilter;
 
-class Leg
+class Person
 {
 
 // const static int z_coord = 0.178;
 
 
 private:
-  int legId;
   int peopleId;
   KalmanFilter* filter;
   Point pos;
   int predictions;
   int observations;
-  bool hasPair_;
   int min_predictions;
   int min_observations;
+  Leg* left, right;
 //   bool isRemoved;
 
 public:
-  Leg(int min_preds, int min_obs) : min_predictions(min_preds), min_observations(min_obs) {}
+  Person(int min_preds, int min_obs) : min_predictions(min_preds), min_observations(min_obs) {}
 
-  bool configure(Point p)
+  bool configure(Point p, Leg* l, Leg* r)
   {
     peopleId = -1;
     pos = p;
-    hasPair_ = false;
     predictions = observations = 0;
+    left = l;
+    right = r;
 
     std::vector<double> in;
     // position
@@ -100,16 +97,6 @@ public:
   void setPeopleId(int id)
   {
 	  peopleId = id;
-  }
-
-  void setHasPair(bool value)
-  {
-	  hasPair_ = value;
-  }
-
-  bool hasPair()
-  {
-	  return hasPair_;
   }
 
   bool likelihood(const double& x, const double& y, double& out)
