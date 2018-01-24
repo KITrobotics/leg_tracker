@@ -2,8 +2,6 @@
 #include <iirob_filters/kalman_filter.h>
 #include <leg.h>
 
-typedef iirob_filters::MultiChannelKalmanFilter<double> KalmanFilter;
-
 class Person
 {
 
