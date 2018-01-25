@@ -9,7 +9,7 @@ circle_fitting: centroid # ransac or centroid
 leg_radius: 0.1
 min_observations: 4
 radius_of_person: 1.0
-min_predictions: 7
+min_predictions: 5
 z_coordinate: 0.178
 vel_stance_threshold: 0.47
 vel_swing_threshold: 0.93

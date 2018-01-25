@@ -17,6 +17,7 @@ private:
   int peopleId;
   KalmanFilter* filter;
   Point pos;
+  Point vel, acc;
   int predictions;
   int observations;
   bool hasPair_;
@@ -61,7 +62,15 @@ public:
   {
     std::vector<double> prediction;
     filter->predict(prediction);
-    if (prediction.size() >= 2) { pos.x = prediction[0]; pos.y = prediction[1]; }
+    if (prediction.size() >= 6) 
+    { 
+      pos.x = prediction[0]; 
+      pos.y = prediction[1]; 
+      vel.x = prediction[2];
+      vel.y = prediction[3];
+      acc.x = prediction[4];
+      acc.y = prediction[5];
+    }
     if (predictions < min_predictions) { predictions++; }
     observations = 0;
   }
@@ -69,9 +78,13 @@ public:
   void update(const std::vector<double>& in, std::vector<double>& out)
   {
     filter->update(in, out);
-    if (out.size() < 2) { ROS_ERROR("Update out vector size is too small!"); return; }
+    if (out.size() < 6) { ROS_ERROR("Update out vector size is too small!"); return; }
     pos.x = out[0];
     pos.y = out[1];
+    vel.x = out[2];
+    vel.y = out[3];
+    acc.x = out[4];
+    acc.y = out[5];
     predictions = 0;
     if (observations < min_observations) { observations++; }
   }
@@ -84,6 +97,11 @@ public:
   Point getPos()
   {
     return pos;
+  }
+  
+  Point getVel()
+  {
+    return vel;
   }
 
   int getPeopleId()
@@ -111,13 +129,19 @@ public:
 	  return hasPair_;
   }
   
-  bool likelihood(const double& x, const double& y, double& out)
+  bool getGatingMatrix(Eigen::MatrixXd& data_out) 
+  {
+    if (!filter->getGatingMatrix(data_out)) { return false; }
+    return true;
+  }
+  
+  double likelihood(const double x, const double y)
   {
     std::vector<double> in; 
     in.push_back(x); in.push_back(y);
-    
+    double out = 0.;
     if (!filter->likelihood(in, out)) { return false; }
-    return true;
+    return out;
   }
 
 };
