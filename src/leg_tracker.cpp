@@ -41,6 +41,7 @@
 #include <Eigen/Geometry>
 #include <AuctionAlgorithm.h>
 #include <Eigen/Eigenvalues>
+#include <person.h>
 
 
 /*
@@ -48,11 +49,11 @@
  * N1 ~ new people appeared
  * N2 ~ continue tracking of already tracked people which were occluded
  * N1 = 0.7 and N2 = 1.2
- * 
- * Invarianten erstellen: 
+ *
+ * Invarianten erstellen:
  * if scan is not valid or scan does not have enough points -> calculate predictions
- * 
- * 
+ *
+ *
  *
  * Invarianten erstellen:
  * if scan is not valid or scan does not have enough points
@@ -102,19 +103,21 @@ private:
   int legs_gathered;
   int min_observations;
   int min_predictions;
-  double radius_of_person;
+  double max_dist_btw_legs;
   int id_counter;
   double z_coordinate;
   double vel_stance_threshold;
   double vel_swing_threshold;
 
+  int state_dimensions;
 
 
   //PeopleMap persons;
   std::vector<Leg> removed_legs;
   std::vector<Leg> legs;
+  std::vector<Person> persons;
 //   std::vector<std::pair<Leg, Leg> > persons;
-  
+
   std::vector<Leg> temporary_legs;
 
 //   iirob_filters::KalmanFilterParameters params_;
@@ -150,10 +153,11 @@ public:
     nh_.param("leg_radius", leg_radius, 0.1);
     nh_.param("min_observations", min_observations, 4);
     nh_.param("min_predictions", min_predictions, 7);
-    nh_.param("radius_of_person", radius_of_person, 1.0);
+    nh_.param("max_dist_btw_legs", max_dist_btw_legs, 1.0);
     nh_.param("z_coordinate", z_coordinate, 0.178);
     nh_.param("vel_stance_threshold", vel_stance_threshold, 0.47);
     nh_.param("vel_swing_threshold", vel_swing_threshold, 0.93);
+    nh_.param("state_dimensions", state_dimensions, 6);
 
     legs_gathered = id_counter = 0;
 
@@ -203,14 +207,14 @@ public:
     // phase 0
     if (isRightInStance && isLeftInStance) { return 0; }
 
-    double inner_pos_vel_product = (pos_left.x - pos_right.x) * vel_left.x + 
+    double inner_pos_vel_product = (pos_left.x - pos_right.x) * vel_left.x +
 				   (pos_left.y - pos_right.y) * vel_left.y;
     // phase 1
     if (isLeftInSwingPhase && isRightInStance && inner_pos_vel_product > 0) { return 1; }
     // phase 2
     if (isLeftInSwingPhase && isRightInStance && inner_pos_vel_product <= 0) { return 2; }
 
-    inner_pos_vel_product = (pos_right.x - pos_left.x) * vel_right.x + 
+    inner_pos_vel_product = (pos_right.x - pos_left.x) * vel_right.x +
 			    (pos_right.y - pos_left.y) * vel_right.y;
     // phase 3
     if (isRightInSwingPhase && isLeftInStance && inner_pos_vel_product > 0) { return 3; }
@@ -235,14 +239,14 @@ public:
 
         */
   }
-  
-  
+
+
 //   typedef typename Filter::MeasurementSpaceVector MeasurementSpaceVector;
 //   typedef std::vector<MeasurementSpaceVector> Measurements;
-  void GNN(PointCloud measurements) 
+  void GNN(PointCloud measurements)
   {
 //     template<size_t StateDim, size_t MeasurementDim>
-    
+
 //     typedef KalmanFilter<StateDim, MeasurementDim> Filter;
 
 //     typedef std::vector<Filter> Filters;
@@ -292,8 +296,8 @@ public:
 	else // is this assignment a measurement that is considered new?
 	{
 	    // create filter with measurment and keep it
-	    Leg l(min_predictions, min_observations);
-	    if (!l.configure(measurements.points[e.x])) { ROS_ERROR("GNN: Configuring of leg failed!"); continue; }
+	    Leg l;
+	    if (!l.configure(state_dimensions, min_predictions, min_observations, measurements.points[e.x])) { ROS_ERROR("GNN: Configuring of leg failed!"); continue; }
 	    newLegs.emplace_back(l);
 	}
     }
@@ -414,8 +418,8 @@ public:
 
   void initLeg(const Point& p)
   {
-    Leg l(min_predictions, min_observations);
-    if (!l.configure(p)) { ROS_ERROR("Configuring failed!"); return; }
+    Leg l;
+    if (!l.configure(state_dimensions, min_predictions, min_observations, p)) { ROS_ERROR("Configuring failed!"); return; }
     legs.push_back(l);
     ROS_INFO("AFTER initLeg");
     printLegsInfo();
@@ -500,12 +504,13 @@ public:
       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
       cloud.points.push_back(l.getPos());
       ma_leg_pos.markers.push_back(getMarker(l.getPos().x, l.getPos().y, max_id, true));
-      ma_leg_vel.markers.push_back(getArrowMarker(l.getPos().x, l.getPos().y, l.getPos().x + l.getVel().x, l.getPos().y + l.getVel().y, max_id));
+//       ma_leg_vel.markers.push_back(getArrowMarker(l.getPos().x + 0.01, l.getPos().y + 0.01, 
+// 	  l.getPos().x + l.getVel().x + 0.01, l.getPos().y + l.getVel().y + 0.01, max_id));
       max_id++;
       id++;
     }
     marker_array_pos_publisher.publish(ma_leg_pos);
-   // marker_array_vel_publisher.publish(ma_leg_vel);
+//     marker_array_vel_publisher.publish(ma_leg_vel);	
     pcl_cloud_publisher.publish(cloud.makeShared());
   }
   
@@ -602,7 +607,7 @@ public:
     //ROS_INFO("predictions: %d, cluster_centroids: %d", (int) predictions.points.size(), (int) cluster_centroids.points.size());
     //if (predictions.points.size() == 0 && cluster_centroids.points.size() == 0) { ROS_INFO("There are no leg candidates and no predictions!"); return; }
 
-    
+
     // there are no measurements for legs
     if (cluster_centroids.points.size() == 0)
     {
@@ -624,9 +629,9 @@ public:
 //       }
 //       return;
 //     }
-    
+
 //     visualization_msgs::MarkerArray ma;
-    
+
     // if there is matched measurement then update else predict
     for (int i = 0; i < legs.size(); i++)
     {
@@ -652,6 +657,22 @@ public:
     }
       
       /*
+=======
+//     for (int i = 0; i < legs.size(); i++)
+//     {
+//       if (cluster_centroids.points.size() == 0) { predictLeg(i); continue; }
+//
+
+      // NN
+//       Point prediction, nearest;
+//       prediction = legs[i].computePrediction();
+//       ma.markers.push_back(getMarker(prediction.x, prediction.y, 10, false));
+//       double radius = (2 + legs[i].getPredictions()) * leg_radius;
+//       if (!findAndEraseMatch(prediction, cluster_centroids, nearest, radius)) { predictLeg(i); }
+//       else { updateLeg(legs[i], nearest); }
+
+
+>>>>>>> origin/master
       // GNN
       const size_t m = cluster_centroids.points.size();
       const size_t f = legs.size();
@@ -682,10 +703,10 @@ public:
       // in this case it is global nearest neighbour by minimizing the distances
       // over all measurement-filter-associations
       Auction<double>::Edges assignments = Auction<double>::solve(w_ij);
-      
-      
+
+
       std::vector<Leg> newLegs;
-      
+
       for ( const auto & e : assignments )
       {
 	  // is assignment an assignment from an already existing filter to a measurement?
@@ -698,21 +719,22 @@ public:
 	  else // is this assignment a measurement that is considered new?
 	  {
 	      // create filter with measurment and keep it
-	      Leg l(min_predictions, min_observations);
+	      Leg l(state_dimensions, min_predictions, min_observations);
 	      if (!l.configure(cluster_centroids.points[e.x])) { ROS_ERROR("GNN: Configuring of leg failed!"); continue; }
 	      newLegs.emplace_back(l);
 	  }
       }
-      
+
       legs = newLegs;
+<<<<<<< HEAD
 	*/
 //     }
 //     marker_array_publisher.publish(ma);
-	
+
     // if there is enough measurements for legs try to find people
 
     findPeople();
-    
+
     // save new measurements of legs
     for (Point p : cluster_centroids.points)
     {
@@ -749,14 +771,6 @@ public:
     return true;
   }
   
-  double calculateDistanceBtw2DPoints(const Point& p, const Point& r) 
-  {
-    Point s;
-    s.x = std::abs(p.x - r.x);
-    s.y = std::abs(p.y - r.y);
-    return calculateNorm(s);
-  }
-  
   void separateLegs(int i, int j) 
   {
     legs[i].setHasPair(false);
@@ -773,7 +787,7 @@ public:
       for (int j = i + 1; j < legs.size(); j++) 
       {
 	if (legs[i].getPeopleId() == legs[j].getPeopleId()) {
-	  if (calculateDistanceBtw2DPoints(legs[i].getPos(), legs[j].getPos()) > radius_of_person) 
+	  if (distanceBtwTwoPoints(legs[i].getPos(), legs[j].getPos()) > max_dist_btw_legs) 
 	  {
 	    separateLegs(i, j);
 	  }
@@ -799,54 +813,122 @@ public:
   void findSecondLeg(int fst_leg)
   {
     ROS_INFO("findSecondLeg");
-	PointCloud potential_legs;
-	std::vector<int> indices;
-	for (int i = fst_leg + 1; i < legs.size(); i++)
-	{
-		if (legs[i].hasPair())
-		{
-			continue;
-		}
+    //PointCloud potential_legs;
+    std::vector<int> indices_of_potential_legs;
+    for (int i = fst_leg + 1; i < legs.size(); i++)
+    {
+      if (i == fst_leg || legs[i].hasPair() || legs[i].getObservations() < min_observations
+	|| distanceBtwTwoPoints(legs[fst_leg].getPos(), legs[i].getPos()) > max_dist_btw_legs)
+      {
+	      continue;
+      }
 
-		potential_legs.points.push_back(legs[i].getPos());
-		indices.push_back(i);
-	}
-	
-	if (potential_legs.size() == 0) { ROS_INFO("There is no potential second leg!"); return; }
+//       potential_legs.points.push_back(legs[i].getPos());
+      indices_of_potential_legs.push_back(i);
+    }
 
-	int snd_leg = findMatch(legs[fst_leg].getPos(), potential_legs, indices);
-	if (snd_leg == -1) { ROS_INFO("Could not find second leg!"); return; }
+    if (indices_of_potential_legs.size() == 0) { ROS_INFO("There is no potential second leg!"); return; }
 
-	setPeopleId(fst_leg, snd_leg);
-	
-  }  
+    if (indices_of_potential_legs.size() == 1) { setPeopleId(fst_leg, indices_of_potential_legs[0]); return; }
+
+    int snd_leg = -1;
+  	//snd_leg = findMatch(legs[fst_leg].getPos(), potential_legs, indices);
+
+    for (int i = 0; i < indices_of_potential_legs.size(); i++)
+    {
+      bool isHistoryDistanceValid = true;
+      std::list<std::vector<double> >::iterator fst_history_it = legs[fst_leg].getHistory().begin(),
+        snd_history_it = legs[indices_of_potential_legs[i]].getHistory().begin();
+      int history_size = legs[fst_leg].getHistory().size();
+      if (legs[indices_of_potential_legs[i]].getHistory().size() != history_size)
+      {
+        ROS_ERROR("History check: queues are not equal in size!");
+        return;
+      }
+      for (int j = 0; j < history_size; j++)
+      {
+        if (distanceBtwTwoPoints(fst_history_it->at(0), fst_history_it->at(1),
+          snd_history_it->at(0), snd_history_it->at(1)) > max_dist_btw_legs)
+        {
+          ROS_INFO("History check: distance is not valid!");
+          isHistoryDistanceValid = false;
+          break;
+        }
+        fst_history_it++; snd_history_it++;
+      }
+
+      if (isHistoryDistanceValid) { snd_leg = i; break; }
+
+    }
+
+    if (snd_leg == -1) { ROS_INFO("Could not find second leg!"); return; }
+
+    setPeopleId(fst_leg, snd_leg);
+
+  }
+
+  double distanceBtwTwoPoints(double x1, double y1, double x2, double y2)
+  {
+    return std::sqrt(std::pow(x1 - x2, 2) + std::pow(y1 - y2, 2));
+  }
+
   
-  void eraseRemovedLegsWithoutId()
+  /*int findMatch(const Point& searchPoint, const PointCloud& cloud, const std::vector<int>& indices)
   {
-	  for (std::vector<Leg>::iterator it = removed_legs.begin(); it != removed_legs.end(); it++)
-	  {
-		  if (it->getPeopleId() == -1)
-		  {
-			  removed_legs.erase(it);
-		  }
-	  }
-  }
+    ROS_INFO("findMatch for (%f, %f) with radius %f", searchPoint.x, searchPoint.y, radius_of_person);
+    printCloudPoints(cloud);
+    int out_index = -1;
+    if (cloud.points.size() == 0) { return out_index; }
+    pcl::KdTreeFLANN<Point> kdtree;
+    kdtree.setInputCloud (cloud.makeShared());
+    std::vector<int> pointIdxRadius;
+    std::vector<float> pointsSquaredDistRadius;
+    int count = kdtree.radiusSearch (searchPoint, radius_of_person, pointIdxRadius, pointsSquaredDistRadius);
+	
+    if (count == 0) { return out_index; }
+//     else if (count == 1) 
+//     {
+      int K = 1;
+      std::vector<int> pointsIdx(K);
+      std::vector<float> pointsSquaredDist(K);
+      kdtree.nearestKSearch (searchPoint, K, pointsIdx, pointsSquaredDist);
+      ROS_INFO("legs.size: %d, pointsIdx[0]: %d, indices[pointsIdx[0]]: %d, pointsSquaredDist: %f",
+	(int) legs.size(), pointsIdx[0], indices[pointsIdx[0]], pointsSquaredDist[0]);
+      if (pointsSquaredDist[0] <= radius_of_person && pointsSquaredDist[0] >= 0.5 * leg_radius) {
+	out_index = indices[pointsIdx[0]];
+      }
+//     } 
+//     else //(count > 1)
+//     {
+//       ROS_INFO("mahalanobis");
+//       // interesting more than one leg matched
+//       // use mahalanobis distance and some other data association methods  
+//       
+//       
+//       int index = -1;
+//       double max_likelihood = -1.;
+//       for (int i = 0; i < cloud.points.size(); i++) 
+//       {
+// 	double likelihood;
+// 	if (!legs[legIndex].likelihood(cloud.points[i].x, cloud.points[i].y, likelihood)) { return out_index; }
+// 	ROS_INFO("legIndex: %d, sPoint.x: %f, sPoint.y: %f, max_likelihood: %f, cloudPoint[%d].x: %f, cloudPoint[%d].y: %f, likelihood: %f",
+// 	  legIndex, searchPoint.x, searchPoint.y, max_likelihood, i, cloud.points[i].x, i, cloud.points[i].y, likelihood);
+// 	if (likelihood > max_likelihood) 
+// 	{ 
+// 	  index = i; 
+// 	  max_likelihood = likelihood; 
+// 	}
+//       }
+//       
+//       if (index == -1) { return out_index; }
+//     }
+    
+    return out_index;
+  }*/
 
-  void eraseRemovedLeg(int id)
-  {
-	  for (std::vector<Leg>::iterator it = removed_legs.begin(); it != removed_legs.end(); it++)
-	  {
-		  if (it->getPeopleId() == id)
-		  {
-			  removed_legs.erase(it);
-			  return;
-		  }
-	  }
-  }
 
   void setPeopleId(int fst_leg, int snd_leg)
   {
-
 	  int id = -1;
 	  bool isIdSet = false;
 	  isIdSet = legs[fst_leg].getPeopleId() != -1 || legs[snd_leg].getPeopleId() != -1;
@@ -893,6 +975,29 @@ public:
 	  //persons.add(id, std::make_pair(legs[fst_leg].getPos(), legs[fst_leg].getPos()));
   }
 
+  void eraseRemovedLegsWithoutId()
+  {
+	  for (std::vector<Leg>::iterator it = removed_legs.begin(); it != removed_legs.end(); it++)
+	  {
+		  if (it->getPeopleId() == -1)
+		  {
+			  removed_legs.erase(it);
+		  }
+	  }
+  }
+
+  void eraseRemovedLeg(int id)
+  {
+	  for (std::vector<Leg>::iterator it = removed_legs.begin(); it != removed_legs.end(); it++)
+	  {
+		  if (it->getPeopleId() == id)
+		  {
+			  removed_legs.erase(it);
+			  return;
+		  }
+	  }
+  }
+
   void printCloudPoints(const PointCloud& cloud)
   {
     for (int i = 0; i < cloud.points.size(); i++)
@@ -901,12 +1006,18 @@ public:
     }
   }
 
+  double distanceBtwTwoPoints(Point p, Point r)
+  {
+    return std::sqrt(std::pow(p.x - r.x, 2) + std::pow(p.y - r.y, 2));
+  }
+
 
   void calculateAndPubOval(double x1, double y1, double x2, double y2, int id)
   {
 	    double x = (x1 + x2) / 2;
 	    double y = (y1 + y2) / 2;
-	    double dist = std::sqrt(std::pow(x1 - x2, 2) + std::pow(y1 - y2, 2));
+	    //double dist = std::sqrt(std::pow(x1 - x2, 2) + std::pow(y1 - y2, 2));
+      double dist = distanceBtwTwoPoints(x1, y1, x2, y2);
 	    double scale_x = dist + 5 * leg_radius;
 	    double scale_y = 5 * leg_radius;
 // 	    ROS_INFO("x1 - x2: %f", std::abs(x1 - x2));
@@ -1043,8 +1154,8 @@ public:
 	    max_id++;
 
 	    ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
-	    id, legs[i].getPos().x, legs[i].getPos().y, 
-		     legs[j].getPos().x, legs[j].getPos().y, 
+	    id, legs[i].getPos().x, legs[i].getPos().y,
+		     legs[j].getPos().x, legs[j].getPos().y,
 		     legs[i].getPredictions(), legs[j].getPredictions(),
 		      legs[i].getObservations(), legs[j].getObservations(),
 		     legs[i].hasPair(), legs[j].hasPair());
@@ -1056,58 +1167,6 @@ public:
     people_pub.publish(ma_people);
   }
 
-  int findMatch(const Point& searchPoint, const PointCloud& cloud, const std::vector<int>& indices)
-  {
-    ROS_INFO("findMatch for (%f, %f) with radius %f", searchPoint.x, searchPoint.y, radius_of_person);
-    printCloudPoints(cloud);
-    int out_index = -1;
-    if (cloud.points.size() == 0) { return out_index; }
-    pcl::KdTreeFLANN<Point> kdtree;
-    kdtree.setInputCloud (cloud.makeShared());
-    std::vector<int> pointIdxRadius;
-    std::vector<float> pointsSquaredDistRadius;
-    int count = kdtree.radiusSearch (searchPoint, radius_of_person, pointIdxRadius, pointsSquaredDistRadius);
-	
-    if (count == 0) { return out_index; }
-//     else if (count == 1) 
-//     {
-      int K = 1;
-      std::vector<int> pointsIdx(K);
-      std::vector<float> pointsSquaredDist(K);
-      kdtree.nearestKSearch (searchPoint, K, pointsIdx, pointsSquaredDist);
-      ROS_INFO("legs.size: %d, pointsIdx[0]: %d, indices[pointsIdx[0]]: %d, pointsSquaredDist: %f",
-	(int) legs.size(), pointsIdx[0], indices[pointsIdx[0]], pointsSquaredDist[0]);
-      if (pointsSquaredDist[0] <= radius_of_person && pointsSquaredDist[0] >= 0.5 * leg_radius) {
-	out_index = indices[pointsIdx[0]];
-      }
-//     } 
-//     else //(count > 1)
-//     {
-//       ROS_INFO("mahalanobis");
-//       // interesting more than one leg matched
-//       // use mahalanobis distance and some other data association methods  
-//       
-//       
-//       int index = -1;
-//       double max_likelihood = -1.;
-//       for (int i = 0; i < cloud.points.size(); i++) 
-//       {
-// 	double likelihood;
-// 	if (!legs[legIndex].likelihood(cloud.points[i].x, cloud.points[i].y, likelihood)) { return out_index; }
-// 	ROS_INFO("legIndex: %d, sPoint.x: %f, sPoint.y: %f, max_likelihood: %f, cloudPoint[%d].x: %f, cloudPoint[%d].y: %f, likelihood: %f",
-// 	  legIndex, searchPoint.x, searchPoint.y, max_likelihood, i, cloud.points[i].x, i, cloud.points[i].y, likelihood);
-// 	if (likelihood > max_likelihood) 
-// 	{ 
-// 	  index = i; 
-// 	  max_likelihood = likelihood; 
-// 	}
-//       }
-//       
-//       if (index == -1) { return out_index; }
-//     }
-    
-    return out_index;
-  }
 
   bool findAndEraseMatch(const Point& searchPoint, PointCloud& cloud, Point& out, double radius)
   {
@@ -1135,7 +1194,7 @@ public:
     cloud.points.erase(cloud.points.begin() + pointsIdx[0]);
     return true;
   }
-  
+
 
 
   void computeKalmanFilterPredictions(PointCloud& predictions)
@@ -1564,19 +1623,19 @@ public:
     // clustering
     if (!clustering(filteredCloudXYZ, cluster_centroids)) { predictLegs(); return; }
 
-    
-    
+
+
     // data association
     matchLegCandidates(cluster_centroids);
     eraseRemovedLegsWithoutId();
-    
-//     GNN(cluster_centroids); 
-    
+
+//     GNN(cluster_centroids);
+
 
 
 
     visLegs(cluster_centroids);
-    //vis_people();
+    vis_people();
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
 
 //     PointCloud::Ptr left(new PointCloud());
@@ -1627,8 +1686,8 @@ public:
     vis_pub.publish( marker );
 
   }
-  
-  void pub_line(double x, double y, double width) 
+
+  void pub_line(double x, double y, double width)
   {
     visualization_msgs::Marker marker;
     marker.header.frame_id = transform_link;
@@ -1648,19 +1707,19 @@ public:
 //     marker.scale.y = y_upper_limit - y_lower_limit;
 //     marker.scale.z = 0;
     marker.color.a = 1.0; // Don't forget to set the alpha!
-    marker.color.g = 1.0; 
+    marker.color.g = 1.0;
 //     if (id == 0)
-//       marker.color.r = 1.0; 
+//       marker.color.r = 1.0;
 //     if (id == 2)
-//       marker.color.g = 1.0; 
+//       marker.color.g = 1.0;
 //     if (id == 1)
 //       marker.color.b = 1.0;
     //only if using a MESH_RESOURCE marker type:
 //     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
     vis_pub.publish( marker );
   }
-  
-  void pub_border_square() 
+
+  void pub_border_square()
   {
     visualization_msgs::Marker marker;
     marker.header.frame_id = transform_link;
@@ -1680,19 +1739,19 @@ public:
     marker.scale.y = y_upper_limit - y_lower_limit;
 //     marker.scale.z = 0;
     marker.color.a = 1.0; // Don't forget to set the alpha!
-    marker.color.g = 1.0; 
+    marker.color.g = 1.0;
 //     if (id == 0)
-//       marker.color.r = 1.0; 
+//       marker.color.r = 1.0;
 //     if (id == 2)
-//       marker.color.g = 1.0; 
+//       marker.color.g = 1.0;
 //     if (id == 1)
 //       marker.color.b = 1.0;
     //only if using a MESH_RESOURCE marker type:
 //     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
     tracking_area_pub.publish( marker );
   }
-  
-  void pub_oval(double x, double y, double scale_x, double scale_y, double orientation_x, 
+
+  void pub_oval(double x, double y, double scale_x, double scale_y, double orientation_x,
     double orientation_y, double orientation_z, double orientation_w, int id)
   {
 
