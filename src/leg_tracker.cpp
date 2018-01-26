@@ -108,8 +108,10 @@ private:
   double z_coordinate;
   double vel_stance_threshold;
   double vel_swing_threshold;
-
   int state_dimensions;
+  int minClusterSize;
+  int maxClusterSize;
+  double clusterTolerance;
 
 
   //PeopleMap persons;
@@ -158,6 +160,9 @@ public:
     nh_.param("vel_stance_threshold", vel_stance_threshold, 0.47);
     nh_.param("vel_swing_threshold", vel_swing_threshold, 0.93);
     nh_.param("state_dimensions", state_dimensions, 6);
+    nh_.param("minClusterSize", minClusterSize, 3);
+    nh_.param("maxClusterSize", maxClusterSize, 100);
+    nh_.param("clusterTolerance", clusterTolerance, 0.07);
 
     legs_gathered = id_counter = 0;
 
@@ -328,8 +333,8 @@ public:
     double orientation_x = q.x();
     double orientation_y = q.y();
     double orientation_z = q.z();
-    
-    ROS_INFO("meanX: %f, meanY: %f, scale: %f, R1: %f, R2: %f, angle: %f", 
+
+    ROS_INFO("meanX: %f, meanY: %f, scale: %f, R1: %f, R2: %f, angle: %f",
 	     meanX, meanY, scale95, R1, R2, tilt);
 
     //pub_oval(meanX, meanY, R1, R2, orientation_x, orientation_y, orientation_z, orientation_w, -2);
@@ -504,17 +509,17 @@ public:
       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
       cloud.points.push_back(l.getPos());
       ma_leg_pos.markers.push_back(getMarker(l.getPos().x, l.getPos().y, max_id, true));
-//       ma_leg_vel.markers.push_back(getArrowMarker(l.getPos().x + 0.01, l.getPos().y + 0.01, 
+//       ma_leg_vel.markers.push_back(getArrowMarker(l.getPos().x + 0.01, l.getPos().y + 0.01,
 // 	  l.getPos().x + l.getVel().x + 0.01, l.getPos().y + l.getVel().y + 0.01, max_id));
       max_id++;
       id++;
     }
     marker_array_pos_publisher.publish(ma_leg_pos);
-//     marker_array_vel_publisher.publish(ma_leg_vel);	
+//     marker_array_vel_publisher.publish(ma_leg_vel);
     pcl_cloud_publisher.publish(cloud.makeShared());
   }
-  
-  
+
+
   visualization_msgs::Marker getArrowMarker(double start_x, double start_y, double end_x, double end_y, int id)
   {
     visualization_msgs::Marker marker;
@@ -542,7 +547,7 @@ public:
     marker.points.push_back(start);
     marker.points.push_back(end);
 
-    marker.scale.x = 0.01;	
+    marker.scale.x = 0.01;
     marker.scale.y = 0.02;
 //     marker.scale.z = 0;
     marker.color.a = 1.0; // Don't forget to set the alpha!
@@ -618,7 +623,7 @@ public:
       }
       return;
     }
-    
+
     //// there are no observed legs
 //     if (predictions.points.size() == 0)
 //     {
@@ -636,26 +641,26 @@ public:
     for (int i = 0; i < legs.size(); i++)
     {
       if (cluster_centroids.points.size() == 0) { predictLeg(i); continue; }
-      
+
       Point prediction, match;
       prediction = legs[i].computePrediction();
       //ma.markers.push_back(getMarker(prediction.x, prediction.y, 10, false));
-      
+
       /*
       double radius = (2 + legs[i].getPredictions()) * leg_radius;
       if (!findAndEraseMatch(prediction, cluster_centroids, match, radius)) { predictLeg(i); }*/
-      
-      Eigen::MatrixXd gate; 
+
+      Eigen::MatrixXd gate;
       if (!legs[i].getGatingMatrix(gate)) { ROS_WARN("Could not get the gating matrix!"); predictLeg(i); continue; }
-      
+
       pubCovarianceAsEllipse(prediction.x, prediction.y, gate);
-      
+
       if (!findAndEraseMatchWithCov(i, prediction, cluster_centroids, match)) { predictLeg(i); }
       else { updateLeg(legs[i], match); }
-    
-    
+
+
     }
-      
+
       /*
 =======
 //     for (int i = 0; i < legs.size(); i++)
@@ -741,53 +746,53 @@ public:
       initLeg(p);
     }
   }
-  
-  
+
+
   bool findAndEraseMatchWithCov(int legIndex, const Point& searchPoint, PointCloud& cloud, Point& out)
   {
     ROS_INFO("findAndEraseMatchWithCov");
     if (cloud.points.size() == 0) { ROS_INFO("findAndEraseMatchWithCov: Cloud is emty!"); return false; }
-    
+
     int index = -1;
     double max_likelihood = 0.;
-    for (int i = 0; i < cloud.points.size(); i++) 
+    for (int i = 0; i < cloud.points.size(); i++)
     {
       double likelihood = legs[legIndex].likelihood(cloud.points[i].x, cloud.points[i].y);
       ROS_INFO("legIndex: %d, sPoint.x: %f, sPoint.y: %f, max_likelihood: %f, cloudPoint[%d].x: %f, cloudPoint[%d].y: %f, likelihood: %f",
 	legIndex, searchPoint.x, searchPoint.y, max_likelihood, i, cloud.points[i].x, i, cloud.points[i].y, likelihood);
-      if (likelihood > max_likelihood) 
-      { 
-	index = i; 
-	max_likelihood = likelihood; 
+      if (likelihood > max_likelihood)
+      {
+	index = i;
+	max_likelihood = likelihood;
       }
     }
-    
+
     if (index == -1) { ROS_INFO("findAndEraseMatchWithCov: index = -1!"); return false; }
-    
-    
+
+
     out = cloud.points[index];
     cloud.points.erase(cloud.points.begin() + index);
-    
+
     return true;
   }
-  
-  void separateLegs(int i, int j) 
+
+  void separateLegs(int i, int j)
   {
     legs[i].setHasPair(false);
     legs[j].setHasPair(false);
     legs[i].setPeopleId(-1);
     legs[j].setPeopleId(-1);
   }
-  
-  void checkDistanceOfLegs() 
+
+  void checkDistanceOfLegs()
   {
     for (int i = 0; i < legs.size(); i++)
     {
       if (!legs[i].hasPair()) { continue; }
-      for (int j = i + 1; j < legs.size(); j++) 
+      for (int j = i + 1; j < legs.size(); j++)
       {
 	if (legs[i].getPeopleId() == legs[j].getPeopleId()) {
-	  if (distanceBtwTwoPoints(legs[i].getPos(), legs[j].getPos()) > max_dist_btw_legs) 
+	  if (distanceBtwTwoPoints(legs[i].getPos(), legs[j].getPos()) > max_dist_btw_legs)
 	  {
 	    separateLegs(i, j);
 	  }
@@ -872,7 +877,7 @@ public:
     return std::sqrt(std::pow(x1 - x2, 2) + std::pow(y1 - y2, 2));
   }
 
-  
+
   /*int findMatch(const Point& searchPoint, const PointCloud& cloud, const std::vector<int>& indices)
   {
     ROS_INFO("findMatch for (%f, %f) with radius %f", searchPoint.x, searchPoint.y, radius_of_person);
@@ -884,9 +889,9 @@ public:
     std::vector<int> pointIdxRadius;
     std::vector<float> pointsSquaredDistRadius;
     int count = kdtree.radiusSearch (searchPoint, radius_of_person, pointIdxRadius, pointsSquaredDistRadius);
-	
+
     if (count == 0) { return out_index; }
-//     else if (count == 1) 
+//     else if (count == 1)
 //     {
       int K = 1;
       std::vector<int> pointsIdx(K);
@@ -897,32 +902,32 @@ public:
       if (pointsSquaredDist[0] <= radius_of_person && pointsSquaredDist[0] >= 0.5 * leg_radius) {
 	out_index = indices[pointsIdx[0]];
       }
-//     } 
+//     }
 //     else //(count > 1)
 //     {
 //       ROS_INFO("mahalanobis");
 //       // interesting more than one leg matched
-//       // use mahalanobis distance and some other data association methods  
-//       
-//       
+//       // use mahalanobis distance and some other data association methods
+//
+//
 //       int index = -1;
 //       double max_likelihood = -1.;
-//       for (int i = 0; i < cloud.points.size(); i++) 
+//       for (int i = 0; i < cloud.points.size(); i++)
 //       {
 // 	double likelihood;
 // 	if (!legs[legIndex].likelihood(cloud.points[i].x, cloud.points[i].y, likelihood)) { return out_index; }
 // 	ROS_INFO("legIndex: %d, sPoint.x: %f, sPoint.y: %f, max_likelihood: %f, cloudPoint[%d].x: %f, cloudPoint[%d].y: %f, likelihood: %f",
 // 	  legIndex, searchPoint.x, searchPoint.y, max_likelihood, i, cloud.points[i].x, i, cloud.points[i].y, likelihood);
-// 	if (likelihood > max_likelihood) 
-// 	{ 
-// 	  index = i; 
-// 	  max_likelihood = likelihood; 
+// 	if (likelihood > max_likelihood)
+// 	{
+// 	  index = i;
+// 	  max_likelihood = likelihood;
 // 	}
 //       }
-//       
+//
 //       if (index == -1) { return out_index; }
 //     }
-    
+
     return out_index;
   }*/
 
@@ -1049,7 +1054,7 @@ public:
 	      angle, x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);*/
 	    pub_oval(x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
   }
-  
+
   visualization_msgs::Marker getOvalMarker(double x1, double y1, double x2, double y2, int id)
   {
     double x = (x1 + x2) / 2;
@@ -1074,7 +1079,7 @@ public:
 // 	    double angle = std::acos(temp);
 
     Eigen::Quaterniond q;
-    
+
     q = Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ());
     double orientation_w = q.w();
     double orientation_x = q.x();
@@ -1120,12 +1125,12 @@ public:
   {
     visualization_msgs::MarkerArray ma_people;
     int max_id = 0;
-    
+
     for (int i = 0; i < legs.size(); i++)
     {
       int id = legs[i].getPeopleId();
       if (id == -1) { continue; }
-      
+
 	  // second leg is removed
 	if (!legs[i].hasPair())
 	{
@@ -1163,7 +1168,7 @@ public:
 	}
       }
     }
-    
+
     people_pub.publish(ma_people);
   }
 
@@ -1208,16 +1213,16 @@ public:
   bool clustering(const PointCloud& cloud, PointCloud& cluster_centroids)
   {
 
-    if (cloud.points.size() < 4) { ROS_INFO("Clustering: Too small number of points!"); return false; }
+    if (cloud.points.size() < minClusterSize) { ROS_INFO("Clustering: Too small number of points!"); return false; }
 //     pcl::PCDWriter writer;
 
     pcl::search::KdTree<Point>::Ptr tree (new pcl::search::KdTree<Point>);
     tree->setInputCloud (cloud.makeShared());
     std::vector<pcl::PointIndices> cluster_indices;
     pcl::EuclideanClusterExtraction<Point> ec;
-    ec.setClusterTolerance (0.04); // 4cm
-    ec.setMinClusterSize (4);
-    ec.setMaxClusterSize (100);
+    ec.setClusterTolerance (clusterTolerance); // 4cm
+    ec.setMinClusterSize (minClusterSize);
+    ec.setMaxClusterSize (maxClusterSize);
     ec.setSearchMethod (tree);
     ec.setInputCloud (cloud.makeShared());
     ec.extract (cluster_indices);
@@ -1490,9 +1495,8 @@ public:
 
   bool computeCircularity(const PointCloud::Ptr cloud, std::vector<double>& center)
   {
-    int min_points = 4;
     int num_points = cloud->points.size();
-    if (num_points < min_points) { ROS_ERROR("Circularity and Linerity: Too small number of points!"); return false; }
+    if (num_points < minClusterSize) { ROS_ERROR("Circularity and Linerity: Too small number of points!"); return false; }
     double x_mean, y_mean;
     CvMat* A = cvCreateMat(num_points, 3, CV_64FC1);
     CvMat* B = cvCreateMat(num_points, 1, CV_64FC1);
@@ -1578,7 +1582,7 @@ public:
 //     }
 
   }
-  
+
    void predictLegs()
    {
       int i = 0;
@@ -1586,14 +1590,14 @@ public:
       while (i != legs.size())
       {
 	predictLeg(i);
-	if (size > legs.size()) 
+	if (size > legs.size())
 	{
 	  size = legs.size();
 	}
       }
    }
 
-   
+
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
     pub_border_square();
