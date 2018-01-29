@@ -121,7 +121,8 @@ private:
   int next_leg_id;
 
   //mht
-  std::list<Leg> ents_;
+  std::list<Leg> legs;
+  // std::vector<Leg> legs;
 
 
   //PeopleMap persons;
@@ -269,20 +270,20 @@ public:
 //   void GNN(PointCloud measurements)
 //   {
 // //     template<size_t StateDim, size_t MeasurementDim>
-// 
+//
 // //     typedef KalmanFilter<StateDim, MeasurementDim> Filter;
-// 
+//
 // //     typedef std::vector<Filter> Filters;
-// 
+//
 //     const size_t m = measurements.points.size();
 //     const size_t f = legs.size();
-// 
+//
 //     // create matrix for calculating distances between measurements and predictions
 //     // additional rows for initializing filters (weightet by 1 / (640 * 480))
 //     Eigen::MatrixXd w_ij(m, f + m);
-// 
+//
 //     w_ij = Eigen::MatrixXd::Zero(m, f + m);
-// 
+//
 //     // get likelihoods of measurements within track pdfs
 //     for ( size_t i = 0; i < m; ++i )
 //     {
@@ -293,19 +294,19 @@ public:
 // 	  w_ij(i, j) = temp;
 // 	}
 //     }
-// 
+//
 //     // TODO: must changed to generic
 //     // weights for initializing new filters
 //     for ( size_t j = f; j < m + f; ++j )
 // 	w_ij(j - f, j) = 1. / ((x_upper_limit - x_lower_limit) * (y_upper_limit - y_lower_limit));
-// 
+//
 //     // solve the maximum-sum-of-weights problem (i.e. assignment problem)
 //     // in this case it is global nearest neighbour by minimizing the distances
 //     // over all measurement-filter-associations
 //     Auction<double>::Edges assignments = Auction<double>::solve(w_ij);
-// 
+//
 //     std::vector<Leg> newLegs;
-// 
+//
 //     // for all found assignments
 //     for ( const auto & e : assignments )
 //     {
@@ -324,7 +325,7 @@ public:
 // 	    newLegs.emplace_back(l);
 // 	}
 //     }
-// 
+//
 //     // current filters are now the kept filters
 //     legs = newLegs;
 //   }
@@ -559,7 +560,7 @@ public:
       marker_prev_id = 0;
     }
     visualization_msgs::MarkerArray ma_leg;
-    for (Leg& l : ents_)
+    for (Leg& l : legs)
     {
       ROS_INFO("VISlegs peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d",
       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
@@ -914,7 +915,7 @@ public:
 	  break;
 	}
 	fst_history_it++; snd_history_it++;
-	
+
       }
 
       if (isHistoryDistanceValid) { snd_leg = i; break; }
@@ -1655,13 +1656,13 @@ public:
    void mht(PointCloud& cluster_centroids)
    {
       // Filter model predictions
-      for(std::list<Leg>::iterator it = ents_.begin();
-          it != ents_.end(); it++) {
+      for(std::list<Leg>::iterator it = legs.begin();
+          it != legs.end(); it++) {
            it->predict();
       }
       std::list<Leg> fused;
 
-      assign_munkres(cluster_centroids, ents_, fused);
+      assign_munkres(cluster_centroids, legs, fused);
 
       // Cull dead entities
       std::list<Leg>::iterator it = fused.begin();
@@ -1673,8 +1674,8 @@ public:
            }
       }
 
-      // Copy fused to ents_
-      ents_ = fused;
+      // Copy fused to legs
+      legs = fused;
    }
 
    void assign_munkres(const PointCloud& meas,
@@ -1809,7 +1810,7 @@ public:
 
 
     visLegs();
-// 
+//
     findPeople();
 
 
