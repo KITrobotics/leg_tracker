@@ -27,6 +27,7 @@
 #include <iostream>
 #include <cmath>
 #include <limits>
+#include <assert.h>
 
 template<typename Data> class Munkres
 {
