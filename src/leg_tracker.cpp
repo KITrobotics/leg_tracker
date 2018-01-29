@@ -43,6 +43,9 @@
 #include <Eigen/Eigenvalues>
 #include <person.h>
 
+#include <Matrix.h>
+#include <Entity.h>
+
 
 /*
  * TODO:
@@ -69,6 +72,8 @@ typedef pcl::PointCloud<Point> PointCloud;
 //typedef std::map<int, std::pair<Point, Point> > PeopleMap;
 
 const int cluster_size = 2;
+double mahalanobis_dist_gate = 1.6448536269514722;
+double max_cost = 9999999.;
 
 class LegDetector
 {
@@ -112,6 +117,11 @@ private:
   int minClusterSize;
   int maxClusterSize;
   double clusterTolerance;
+
+  int marker_prev_id;
+
+  //mht
+  std::list<Leg> ents_;
 
 
   //PeopleMap persons;
@@ -165,6 +175,7 @@ public:
     nh_.param("clusterTolerance", clusterTolerance, 0.07);
 
     legs_gathered = id_counter = 0;
+    marker_prev_id = -1;
 
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 1, &LegDetector::processLaserScan, this);
     sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 10);
@@ -519,6 +530,40 @@ public:
     pcl_cloud_publisher.publish(cloud.makeShared());
   }
 
+  void removeOldMarkers()
+  {
+    visualization_msgs::MarkerArray ma;
+    for (int i = 0; i < marker_prev_id; i++) {
+      visualization_msgs::Marker marker;
+      marker.header.frame_id = transform_link;
+      marker.header.stamp = ros::Time();
+      marker.ns = nh_.getNamespace();
+      marker.id = i;
+      marker.action = visualization_msgs::Marker::DELETE;
+      ma.push_back(marker);
+    }
+    marker_array_pos_publisher.publish(ma);
+  }
+
+  void visLegs()
+  {
+    if (marker_prev_id != -1) {
+      removeOldMarkers();
+      marker_prev_id = 0;
+    }
+    visualization_msgs::MarkerArray ma_leg;
+    for (Leg& l : legs)
+    {
+      ROS_INFO("VISlegs peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d",
+      l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
+
+      ma_leg.markers.push_back(getMarker(l.getPos().x, l.getPos().y, marker_prev_id++, true));
+      ma_leg.markers.push_back(getArrowMarker(l.getPos().x + 0.01, l.getPos().y + 0.01,
+	       l.getPos().x + l.getVel().x + 0.01, l.getPos().y + l.getVel().y + 0.01, marker_prev_id++));
+    }
+    marker_array_pos_publisher.publish(ma_leg);
+  }
+
 
   visualization_msgs::Marker getArrowMarker(double start_x, double start_y, double end_x, double end_y, int id)
   {
@@ -822,7 +867,7 @@ public:
     std::vector<int> indices_of_potential_legs;
     for (int i = fst_leg + 1; i < legs.size(); i++)
     {
-      if (i == fst_leg || legs[i].hasPair() || legs[i].getObservations() < min_observations
+      if (i == fst_leg || legs[i].hasPair() /*|| legs[i].getObservations() < min_observations*/
 	|| distanceBtwTwoPoints(legs[fst_leg].getPos(), legs[i].getPos()) > max_dist_btw_legs)
       {
 	      continue;
@@ -852,6 +897,11 @@ public:
       }
       for (int j = 0; j < history_size; j++)
       {
+        if (!fst_history_it || !snd_history_it) {
+          ROS_INFO("History check: iterators are not valid!");
+          isHistoryDistanceValid = false;
+          break;
+        }
         if (distanceBtwTwoPoints(fst_history_it->at(0), fst_history_it->at(1),
           snd_history_it->at(0), snd_history_it->at(1)) > max_dist_btw_legs)
         {
@@ -1597,6 +1647,122 @@ public:
       }
    }
 
+   mht(PointCloud& cluster_centroids)
+   {
+      // Filter model predictions
+      for(std::list<Leg>::iterator it = ents_.begin();
+          it != ents_.end(); it++) {
+           it->predict();
+      }
+
+      std::list<Leg> fused;
+
+      assign_munkres(cluster_centroids.points, ents_, fused);
+
+      // Cull dead entities
+      std::list<Leg>::iterator it = fused.begin();
+      while(it != fused.end()) {
+           if (it->is_dead()) {
+                it = fused.erase(it);
+           } else {
+                it++;
+           }
+      }
+
+      // Copy fused to ents_
+      ents_ = fused;
+   }
+
+   void assign_munkres(std::vector<Point> &meas,
+                         std::list<Leg> &tracks,
+                         std::list<Leg> &fused)
+   {
+       // Create cost matrix between previous and current blob centroids
+       int meas_count = meas.size();
+       int tracks_count = tracks.size();
+
+       // Determine max of meas_count and tracks
+       int rows = -1, cols = -1;
+       if (meas_count >= tracks_count) {
+            rows = cols = meas_count;
+       } else {
+            rows = cols = tracks_count;
+       }
+
+       Matrix<double> matrix(rows, cols);
+
+       // New measurements are along the Y-axis (left hand side)
+       // Previous tracks are along x-axis (top-side)
+       int r = 0;
+       for(std::vector<Point>::iterator it = meas.begin(); it != meas.end();
+           it++, r++) {
+            std::list<Leg>::iterator it_prev = tracks.begin();
+            int c = 0;
+            for (; it_prev != tracks.end(); it_prev++, c++) {
+              // if (it_prev->isPerson() and not it_prev->isInFreeSpace()) {
+              //   matrix(r,c) = max_cost;
+              // } else {
+                double cov = it_prev->getMeasToTrackMatchingCov();
+                double mahalanobis_dist = sqrt(((it->x - it_prev->pos_x)^2 +
+                                                (it->y - it_prev->pos_y)^2) / cov);
+                if (mahalanobis_dist < mahalanobis_dist_gate) {
+                  matrix(r,c) = mahalanobis_dist;
+                } else {
+                  matrix(r,c) = max_cost;
+                }
+              // }
+            }
+       }
+
+       Munkres<double> m;
+       m.solve(matrix);
+
+       // Use the assignment to update the old tracks with new blob measurement
+       r = 0;
+       std::vector<Point>::iterator it = meas.begin();
+       for(int r = 0; r < rows; r++) {
+            std::list<Leg>::iterator it_prev = tracks.begin();
+            for (int c = 0; c < cols; c++) {
+                 if (matrix(r,c) == 0) {
+
+                      if (r < meas_count && c < tracks_count) {
+                           // Does the measurement fall within 3 std's of
+                           // the track?
+                           if (it_prev->is_within_region(*it,3)) {
+                                // Found an assignment. Update the new measurement
+                                // with the track ID and age of older track. Add
+                                // to fused list
+                                //it->matched_track(*it_prev);
+                                it_prev->update(*it);
+                                fused.push_back(*it_prev);
+                           } else {
+                                // TOO MUCH OF A JUMP IN POSITION
+                                // Probably a missed track or a new track
+                                it_prev->missed();
+                                fused.push_back(*it_prev);
+
+                                // And a new track
+                                fused.push_back(Leg(next_available_id(),*it));
+                           }
+                      } else if (r >= meas_count) {
+                           it_prev->missed();
+                           fused.push_back(*it_prev);
+                      } else if (c >= tracks_count) {
+                           // Possible new track
+                           fused.push_back(Leg(next_available_id(),*it));
+                      }
+                      break; // There is only one assignment per row
+                 }
+                 if (c < tracks_count-1) {
+                      it_prev++;
+                 }
+            }
+            if (r < meas_count-1) {
+                 it++;
+            }
+       }
+  }
+
 
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
@@ -1630,16 +1796,23 @@ public:
 
 
     // data association
-    matchLegCandidates(cluster_centroids);
-    eraseRemovedLegsWithoutId();
+    //matchLegCandidates(cluster_centroids);
+    //eraseRemovedLegsWithoutId();
+
+
+    mht(cluster_centroids);
+
+
 
 //     GNN(cluster_centroids);
 
 
+    visLegs();
+
+    findPeople();
 
 
-    visLegs(cluster_centroids);
-    vis_people();
+    //vis_people();
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
 
 //     PointCloud::Ptr left(new PointCloud());

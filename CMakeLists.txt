@@ -5,35 +5,35 @@ project(leg_tracker)
 add_compile_options(-std=c++11)
 
 
-find_package(catkin REQUIRED COMPONENTS 
-#   actionlib 
-#   cob_srvs 
-#   control_msgs 
-#   diagnostic_msgs 
-#   libntcan 
-#   libpcan 
-#   message_generation 
-  roslint 
-  roscpp 
+find_package(catkin REQUIRED COMPONENTS
+#   actionlib
+#   cob_srvs
+#   control_msgs
+#   diagnostic_msgs
+#   libntcan
+#   libpcan
+#   message_generation
+  roslint
+  roscpp
   pluginlib
   roslib
   rosconsole
-  sensor_msgs 
-  std_msgs 
-  std_srvs 
+  sensor_msgs
+  std_msgs
+  std_srvs
   geometry_msgs
   laser_geometry
-  pcl_conversions 
+  pcl_conversions
   pcl_ros
-  tf2 
+  tf2
   tf2_ros
   tf2_msgs
   tf2_sensor_msgs
   iirob_filters
-#   trajectory_msgs 
+#   trajectory_msgs
 #   urdf
 )
-find_package(Eigen3 REQUIRED) 
+find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED)
 
 find_package(Boost REQUIRED)
@@ -49,10 +49,11 @@ catkin_package(
 # target_link_libraries(kalman ${catkin_LIBRARIES} ${Boost_LIBRARIES})
 
 include_directories(
-  include 
-  ${Boost_INCLUDE_DIRS} 
-  ${catkin_INCLUDE_DIRS} 
-  ${OpenCV_INCLUDE_DIRS} 
+  include
+  include/adapters
+  ${Boost_INCLUDE_DIRS}
+  ${catkin_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
   )
 # include_directories(include ${Boost_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS})
@@ -61,18 +62,18 @@ add_executable(${PROJECT_NAME} src/leg_tracker.cpp)
 # set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS "-DOSNAME_LINUX -DWITH_ESD_CAN")
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(
-  ${PROJECT_NAME} 
-#   kalman 
-  ${Boost_INCLUDE_DIRS} 
+  ${PROJECT_NAME}
+#   kalman
+  ${Boost_INCLUDE_DIRS}
   ${Eigen_LIBRARIES}
-  ${catkin_LIBRARIES} 
+  ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
   )
 # target_link_libraries(${PROJECT_NAME} ${Boost_INCLUDE_DIRS} ${catkin_LIBRARIES})
 
 
 ### INSTALL ###
-install(TARGETS ${PROJECT_NAME} 
+install(TARGETS ${PROJECT_NAME}
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

@@ -10,15 +10,24 @@
 typedef pcl::PointXYZ Point;
 typedef iirob_filters::MultiChannelKalmanFilter<double> KalmanFilter;
 
+
+int occluded_dead_age = 10;
+double var_obs = 0.5^2;
+
+int min_predictions = 4;
+int min_observations = 4;
+int state_dimensions = 6;
+
 class Leg
 {
 
 // const static int z_coord = 0.178;
 
 
+
 private:
-  int legId;
-  int peopleId;
+  unsigned int legId;
+  unsigned int peopleId;
   KalmanFilter* filter;
   Point pos;
   Point vel, acc;
@@ -26,21 +35,29 @@ private:
   int predictions;
   int observations;
   bool hasPair_;
-  int min_predictions;
-  int min_observations;
-  int state_dimensions;
+  // int min_predictions;
+  // int min_observations;
+  // int state_dimensions;
   std::list<std::vector<double> > history;
 //   bool isRemoved;
+  int occluded_age;
 
 public:
   Leg() {}
 
+  Leg(unsigned int id, Point& p)
+  {
+    legId = id;
+    occluded_age = 0;
+    configure(p);
+  }
+
   bool configure(int dimensions, int min_preds, int min_obs, Point p)
   {
-    state_dimensions = dimensions;
-    min_predictions = min_preds;
-    min_observations = min_obs;
-    
+  //   state_dimensions = dimensions;
+  //   min_predictions = min_preds;
+  //   min_observations = min_obs;
+
     peopleId = -1;
     pos = p;
     hasPair_ = false;
@@ -60,6 +77,65 @@ public:
     return result;
   }
 
+  bool configure(Point& p)
+  {
+    peopleId = -1;
+    pos = p;
+    hasPair_ = false;
+    predictions = observations = 0;
+
+    std::vector<double> in;
+    // position
+    in.push_back(p.x); in.push_back(p.y);
+    // velocity
+    in.push_back(0.0); in.push_back(0.0);
+    // acceleration
+    in.push_back(0.0); in.push_back(0.0);
+
+    filter = new KalmanFilter();
+    bool result = filter->configure(in);
+    if (!result) { ROS_ERROR("Leg.h: Configure of filter has failed!"); }
+    return result;
+  }
+
+  bool is_within_region(Point& p, double std)
+  {
+    Eigen2d in(p.x, p.y);
+
+    Eigen::MatrixXf B =  H_ * P_ * H_.transpose() + R_;
+    Eigen::MatrixXf diff = in - H_*x_;
+    Eigen::MatrixXf dist_mat = diff.transpose()*B.inverse()*diff;
+    double dist = dist_mat(0,0);
+    //if (dist <= pow(nsigma,2)) {
+    if (dist <= std) {
+         return true;
+    } else {
+         return false;
+    }
+
+    return filter->isWithinRegion(in);
+  }
+
+  void Entity::missed()
+  {
+    occluded_age++;
+  }
+
+  double getMeasToTrackMatchingCov()
+  {
+    double result = filter->getCovarianceMatrix()(0, 0);
+    result += var_obs;
+    return result;
+  }
+
+  bool is_dead()
+  {
+      if (occluded_age > occluded_dead_age) {
+           return true;
+      }
+      return false;
+  }
+
   Point computePrediction()
   {
     std::vector<double> prediction;
@@ -73,9 +149,9 @@ public:
   {
     std::vector<double> prediction;
     filter->predict(prediction);
-    if (prediction.size() != state_dimensions) { ROS_ERROR("Leg.h: Prediction vector size is too small!"); return; } 
-    pos.x = prediction[0]; 
-    pos.y = prediction[1]; 
+    if (prediction.size() != state_dimensions) { ROS_ERROR("Leg.h: Prediction vector size is too small!"); return; }
+    pos.x = prediction[0];
+    pos.y = prediction[1];
     vel.x = prediction[2];
     vel.y = prediction[3];
     acc.x = prediction[4];
@@ -84,6 +160,13 @@ public:
     observations = 0;
     //state = prediction;
     updateHistory(prediction);
+  }
+
+  void update(const Point& p)
+  {
+    std::vector<double> in, out;
+    in.push_back(p.x); in.push_back(p.y);
+    filter->update(in, out);
   }
 
   void update(const std::vector<double>& in, std::vector<double>& out)
@@ -124,7 +207,7 @@ public:
   {
     return pos;
   }
-  
+
   Point getVel()
   {
     return vel;
@@ -154,8 +237,8 @@ public:
   {
 	  return hasPair_;
   }
-  
-  bool getGatingMatrix(Eigen::MatrixXd& data_out) 
+
+  bool getGatingMatrix(Eigen::MatrixXd& data_out)
   {
     if (!filter->getGatingMatrix(data_out)) { return false; }
     return true;
