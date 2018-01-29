@@ -39,12 +39,11 @@
 #include <leg.h>
 #include <math.h>
 #include <Eigen/Geometry>
-#include <AuctionAlgorithm.h>
 #include <Eigen/Eigenvalues>
 #include <person.h>
 #include <cstdlib>
-#include <Matrix.h>
-#include <Entity.h>
+//#include "Matrix.h"
+#include <munkres.h>
 
 
 /*
@@ -119,6 +118,7 @@ private:
   double clusterTolerance;
 
   int marker_prev_id;
+  int next_leg_id;
 
   //mht
   std::list<Leg> ents_;
@@ -266,68 +266,68 @@ public:
 
 //   typedef typename Filter::MeasurementSpaceVector MeasurementSpaceVector;
 //   typedef std::vector<MeasurementSpaceVector> Measurements;
-  void GNN(PointCloud measurements)
-  {
-//     template<size_t StateDim, size_t MeasurementDim>
-
-//     typedef KalmanFilter<StateDim, MeasurementDim> Filter;
-
-//     typedef std::vector<Filter> Filters;
-
-    const size_t m = measurements.points.size();
-    const size_t f = legs.size();
-
-    // create matrix for calculating distances between measurements and predictions
-    // additional rows for initializing filters (weightet by 1 / (640 * 480))
-    Eigen::MatrixXd w_ij(m, f + m);
-
-    w_ij = Eigen::MatrixXd::Zero(m, f + m);
-
-    // get likelihoods of measurements within track pdfs
-    for ( size_t i = 0; i < m; ++i )
-    {
-	for ( size_t j = 0; j < f; ++j )
-	{
-	  double temp = legs[j].likelihood(measurements.points[i].x, measurements.points[i].y);
-	  //if (!legs[j].likelihood(measurements.points[i].x, measurements.points[i].y, temp)) { continue; }
-	  w_ij(i, j) = temp;
-	}
-    }
-
-    // TODO: must changed to generic
-    // weights for initializing new filters
-    for ( size_t j = f; j < m + f; ++j )
-	w_ij(j - f, j) = 1. / ((x_upper_limit - x_lower_limit) * (y_upper_limit - y_lower_limit));
-
-    // solve the maximum-sum-of-weights problem (i.e. assignment problem)
-    // in this case it is global nearest neighbour by minimizing the distances
-    // over all measurement-filter-associations
-    Auction<double>::Edges assignments = Auction<double>::solve(w_ij);
-
-    std::vector<Leg> newLegs;
-
-    // for all found assignments
-    for ( const auto & e : assignments )
-    {
-	// is assignment an assignment from an already existing filter to a measurement?
-	if ( e.y < f )
-	{
-	    // update filter and keep it
-	    updateLeg(legs[e.y], measurements.points[e.x]);
-	    newLegs.emplace_back(legs[e.y]);
-	}
-	else // is this assignment a measurement that is considered new?
-	{
-	    // create filter with measurment and keep it
-	    Leg l;
-	    if (!l.configure(state_dimensions, min_predictions, min_observations, measurements.points[e.x])) { ROS_ERROR("GNN: Configuring of leg failed!"); continue; }
-	    newLegs.emplace_back(l);
-	}
-    }
-
-    // current filters are now the kept filters
-    legs = newLegs;
-  }
+//   void GNN(PointCloud measurements)
+//   {
+// //     template<size_t StateDim, size_t MeasurementDim>
+// 
+// //     typedef KalmanFilter<StateDim, MeasurementDim> Filter;
+// 
+// //     typedef std::vector<Filter> Filters;
+// 
+//     const size_t m = measurements.points.size();
+//     const size_t f = legs.size();
+// 
+//     // create matrix for calculating distances between measurements and predictions
+//     // additional rows for initializing filters (weightet by 1 / (640 * 480))
+//     Eigen::MatrixXd w_ij(m, f + m);
+// 
+//     w_ij = Eigen::MatrixXd::Zero(m, f + m);
+// 
+//     // get likelihoods of measurements within track pdfs
+//     for ( size_t i = 0; i < m; ++i )
+//     {
+// 	for ( size_t j = 0; j < f; ++j )
+// 	{
+// 	  double temp = legs[j].likelihood(measurements.points[i].x, measurements.points[i].y);
+// 	  //if (!legs[j].likelihood(measurements.points[i].x, measurements.points[i].y, temp)) { continue; }
+// 	  w_ij(i, j) = temp;
+// 	}
+//     }
+// 
+//     // TODO: must changed to generic
+//     // weights for initializing new filters
+//     for ( size_t j = f; j < m + f; ++j )
+// 	w_ij(j - f, j) = 1. / ((x_upper_limit - x_lower_limit) * (y_upper_limit - y_lower_limit));
+// 
+//     // solve the maximum-sum-of-weights problem (i.e. assignment problem)
+//     // in this case it is global nearest neighbour by minimizing the distances
+//     // over all measurement-filter-associations
+//     Auction<double>::Edges assignments = Auction<double>::solve(w_ij);
+// 
+//     std::vector<Leg> newLegs;
+// 
+//     // for all found assignments
+//     for ( const auto & e : assignments )
+//     {
+// 	// is assignment an assignment from an already existing filter to a measurement?
+// 	if ( e.y < f )
+// 	{
+// 	    // update filter and keep it
+// 	    updateLeg(legs[e.y], measurements.points[e.x]);
+// 	    newLegs.emplace_back(legs[e.y]);
+// 	}
+// 	else // is this assignment a measurement that is considered new?
+// 	{
+// 	    // create filter with measurment and keep it
+// 	    Leg l;
+// 	    if (!l.configure(state_dimensions, min_predictions, min_observations, measurements.points[e.x])) { ROS_ERROR("GNN: Configuring of leg failed!"); continue; }
+// 	    newLegs.emplace_back(l);
+// 	}
+//     }
+// 
+//     // current filters are now the kept filters
+//     legs = newLegs;
+//   }
 
 
   void pubCovarianceAsEllipse(const double meanX, const double meanY, const Eigen::MatrixXd& S)
@@ -547,7 +547,7 @@ public:
       marker.ns = nh_.getNamespace();
       marker.id = i;
       marker.action = visualization_msgs::Marker::DELETE;
-      ma.push_back(marker);
+      ma.markers.push_back(marker);
     }
     marker_array_pos_publisher.publish(ma);
   }
@@ -559,7 +559,7 @@ public:
       marker_prev_id = 0;
     }
     visualization_msgs::MarkerArray ma_leg;
-    for (Leg& l : legs)
+    for (Leg& l : ents_)
     {
       ROS_INFO("VISlegs peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d",
       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
@@ -906,19 +906,15 @@ public:
       }
       for (int j = 0; j < history_size; j++)
       {
-        if (!fst_history_it || !snd_history_it) {
-          ROS_INFO("History check: iterators are not valid!");
-          isHistoryDistanceValid = false;
-          break;
-        }
-        if (distanceBtwTwoPoints(fst_history_it->at(0), fst_history_it->at(1),
-          snd_history_it->at(0), snd_history_it->at(1)) > max_dist_btw_legs)
-        {
-          ROS_INFO("History check: distance is not valid!");
-          isHistoryDistanceValid = false;
-          break;
-        }
-        fst_history_it++; snd_history_it++;
+	if (distanceBtwTwoPoints(fst_history_it->at(0), fst_history_it->at(1),
+	  snd_history_it->at(0), snd_history_it->at(1)) > max_dist_btw_legs)
+	{
+	  ROS_INFO("History check: distance is not valid!");
+	  isHistoryDistanceValid = false;
+	  break;
+	}
+	fst_history_it++; snd_history_it++;
+	
       }
 
       if (isHistoryDistanceValid) { snd_leg = i; break; }
@@ -1656,17 +1652,16 @@ public:
       }
    }
 
-   mht(PointCloud& cluster_centroids)
+   void mht(PointCloud& cluster_centroids)
    {
       // Filter model predictions
       for(std::list<Leg>::iterator it = ents_.begin();
           it != ents_.end(); it++) {
            it->predict();
       }
-
       std::list<Leg> fused;
 
-      assign_munkres(cluster_centroids.points, ents_, fused);
+      assign_munkres(cluster_centroids, ents_, fused);
 
       // Cull dead entities
       std::list<Leg>::iterator it = fused.begin();
@@ -1682,12 +1677,12 @@ public:
       ents_ = fused;
    }
 
-   void assign_munkres(std::vector<Point> &meas,
+   void assign_munkres(const PointCloud& meas,
                          std::list<Leg> &tracks,
                          std::list<Leg> &fused)
    {
        // Create cost matrix between previous and current blob centroids
-       int meas_count = meas.size();
+       int meas_count = meas.points.size();
        int tracks_count = tracks.size();
 
        // Determine max of meas_count and tracks
@@ -1703,8 +1698,7 @@ public:
        // New measurements are along the Y-axis (left hand side)
        // Previous tracks are along x-axis (top-side)
        int r = 0;
-       for(std::vector<Point>::iterator it = meas.begin(); it != meas.end();
-           it++, r++) {
+       for(const Point& p : meas.points) {
             std::list<Leg>::iterator it_prev = tracks.begin();
             int c = 0;
             for (; it_prev != tracks.end(); it_prev++, c++) {
@@ -1712,8 +1706,8 @@ public:
               //   matrix(r,c) = max_cost;
               // } else {
                 double cov = it_prev->getMeasToTrackMatchingCov();
-                double mahalanobis_dist = sqrt(((it->x - it_prev->pos_x)^2 +
-                                                (it->y - it_prev->pos_y)^2) / cov);
+                double mahalanobis_dist = std::sqrt((std::pow((p.x - it_prev->getPos().x), 2) +
+                                                     std::pow((p.y - it_prev->getPos().y), 2)) / cov);
                 if (mahalanobis_dist < mahalanobis_dist_gate) {
                   matrix(r,c) = mahalanobis_dist;
                 } else {
@@ -1721,28 +1715,27 @@ public:
                 }
               // }
             }
+            r++;
        }
 
        Munkres<double> m;
        m.solve(matrix);
 
        // Use the assignment to update the old tracks with new blob measurement
-       r = 0;
-       std::vector<Point>::iterator it = meas.begin();
-       for(int r = 0; r < rows; r++) {
+       int meas_it = 0;
+       for(r = 0; r < rows; r++) {
             std::list<Leg>::iterator it_prev = tracks.begin();
             for (int c = 0; c < cols; c++) {
                  if (matrix(r,c) == 0) {
-
                       if (r < meas_count && c < tracks_count) {
                            // Does the measurement fall within 3 std's of
                            // the track?
-                           if (it_prev->is_within_region(*it,3)) {
+                           if (it_prev->is_within_region(meas.points[meas_it],3)) {
                                 // Found an assignment. Update the new measurement
                                 // with the track ID and age of older track. Add
                                 // to fused list
                                 //it->matched_track(*it_prev);
-                                it_prev->update(*it);
+                                it_prev->update(meas.points[meas_it]);
                                 fused.push_back(*it_prev);
                            } else {
                                 // TOO MUCH OF A JUMP IN POSITION
@@ -1751,14 +1744,14 @@ public:
                                 fused.push_back(*it_prev);
 
                                 // And a new track
-                                fused.push_back(Leg(next_available_id(),*it));
+                                fused.push_back(Leg(next_leg_id++,meas.points[meas_it]));
                            }
                       } else if (r >= meas_count) {
                            it_prev->missed();
                            fused.push_back(*it_prev);
                       } else if (c >= tracks_count) {
                            // Possible new track
-                           fused.push_back(Leg(next_available_id(),*it));
+                           fused.push_back(Leg(next_leg_id++,meas.points[meas_it]));
                       }
                       break; // There is only one assignment per row
                  }
@@ -1767,11 +1760,10 @@ public:
                  }
             }
             if (r < meas_count-1) {
-                 it++;
+                 meas_it++;
             }
        }
   }
-
 
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
@@ -1817,7 +1809,7 @@ public:
 
 
     visLegs();
-
+// 
     findPeople();
 
 

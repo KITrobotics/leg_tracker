@@ -12,7 +12,7 @@ typedef iirob_filters::MultiChannelKalmanFilter<double> KalmanFilter;
 
 
 int occluded_dead_age = 10;
-double var_obs = 0.5^2;
+double var_obs = 0.25;
 
 int min_predictions = 4;
 int min_observations = 4;
@@ -45,14 +45,14 @@ private:
 public:
   Leg() {}
 
-  Leg(unsigned int id, Point& p)
+  Leg(unsigned int id, const Point& p)
   {
     legId = id;
     occluded_age = 0;
     configure(p);
   }
 
-  bool configure(int dimensions, int min_preds, int min_obs, Point p)
+  bool configure(int dimensions, int min_preds, int min_obs, const Point& p)
   {
   //   state_dimensions = dimensions;
   //   min_predictions = min_preds;
@@ -77,7 +77,7 @@ public:
     return result;
   }
 
-  bool configure(Point& p)
+  bool configure(const Point& p)
   {
     peopleId = -1;
     pos = p;
@@ -98,32 +98,37 @@ public:
     return result;
   }
 
-  bool is_within_region(Point& p, double std)
+  bool is_within_region(const Point& p, double std)
   {
-    Eigen2d in(p.x, p.y);
-
-    Eigen::MatrixXf B =  H_ * P_ * H_.transpose() + R_;
-    Eigen::MatrixXf diff = in - H_*x_;
-    Eigen::MatrixXf dist_mat = diff.transpose()*B.inverse()*diff;
+    Eigen::VectorXd in(2);
+    in << p.x, p.y;
+    Eigen::VectorXd state(2);
+    state << pos.x, pos.y;
+    Eigen::MatrixXd B;
+    if (!filter->getGatingMatrix(B)) { return false; }
+    Eigen::VectorXd diff = in - state;
+    Eigen::MatrixXd dist_mat = diff.transpose()*B.inverse()*diff;
     double dist = dist_mat(0,0);
     //if (dist <= pow(nsigma,2)) {
+                ROS_WARN("5!");
     if (dist <= std) {
          return true;
     } else {
          return false;
     }
-
-    return filter->isWithinRegion(in);
   }
 
-  void Entity::missed()
+  void missed()
   {
     occluded_age++;
   }
 
   double getMeasToTrackMatchingCov()
   {
-    double result = filter->getCovarianceMatrix()(0, 0);
+    double result = 0.;
+    Eigen::MatrixXd cov;
+    if (!filter->getCovarianceMatrix(cov)) { ROS_ERROR("Leg.h: getCovarianceMatrix() has failed!"); return result; }
+    result = cov(0, 0);
     result += var_obs;
     return result;
   }

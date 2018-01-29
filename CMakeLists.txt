@@ -50,7 +50,6 @@ catkin_package(
 
 include_directories(
   include
-  include/adapters
   ${Boost_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
@@ -58,7 +57,7 @@ include_directories(
   )
 # include_directories(include ${Boost_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS})
 
-add_executable(${PROJECT_NAME} src/leg_tracker.cpp)
+add_executable(${PROJECT_NAME}  src/Munkres.cpp src/leg_tracker.cpp)
 # set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS "-DOSNAME_LINUX -DWITH_ESD_CAN")
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(
@@ -82,4 +81,4 @@ install(TARGETS ${PROJECT_NAME}
 # install(FILES ${PROJECT_SOURCE_DIR}/common/lib/${MYARCH}/libSDHLibrary-CPP.so DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
 
 ### LINT ###
-roslint_cpp(src/leg_tracker.cpp)
+roslint_cpp(src/Matrix.cpp src/Munkres.cpp src/leg_tracker.cpp)
