@@ -42,7 +42,7 @@
 #include <AuctionAlgorithm.h>
 #include <Eigen/Eigenvalues>
 #include <person.h>
-
+#include <cstdlib>
 #include <Matrix.h>
 #include <Entity.h>
 
@@ -154,6 +154,8 @@ public:
 
   void init()
   {
+    std::srand(1);
+
     nh_.param("scan_topic", scan_topic, std::string("/base_laser_rear/scan"));
     nh_.param("transform_link", transform_link, std::string("base_link"));
     nh_.param("x_lower_limit", x_lower_limit, 0.0);
@@ -188,6 +190,11 @@ public:
     tracking_area_pub = nh_.advertise<visualization_msgs::Marker>("tracking_area", 10);
     people_pub = nh_.advertise<visualization_msgs::MarkerArray>("people", 10);
 //
+  }
+
+  double getRandomNumberFrom0To1()
+  {
+      return (double)rand() / (double)RAND_MAX ;
   }
 
   void handleNotSetParameter(std::string parameter)
@@ -559,7 +566,7 @@ public:
 
       ma_leg.markers.push_back(getMarker(l.getPos().x, l.getPos().y, marker_prev_id++, true));
       ma_leg.markers.push_back(getArrowMarker(l.getPos().x + 0.01, l.getPos().y + 0.01,
-	       l.getPos().x + l.getVel().x + 0.01, l.getPos().y + l.getVel().y + 0.01, marker_prev_id++));
+	       l.getPos().x + 0.5 * l.getVel().x + 0.01, l.getPos().y + 0.5 * l.getVel().y + 0.01, marker_prev_id++));
     }
     marker_array_pos_publisher.publish(ma_leg);
   }
@@ -585,16 +592,18 @@ public:
     geometry_msgs::Point start, end;
     start.x = start_x;
     start.y = start_y;
-    start.z = z_coordinate;
+    start.z = z_coordinate - 0.01;
     end.x = end_x;
     end.y = end_y;
-    end.z = z_coordinate;
+    end.z = z_coordinate - 0.01;
+    marker.pose.position.x = 0.;
+    marker.pose.position.y = 0.;
+    marker.pose.position.z = z_coordinate - 0.1;
     marker.points.push_back(start);
     marker.points.push_back(end);
-
-    marker.scale.x = 0.01;
-    marker.scale.y = 0.02;
-//     marker.scale.z = 0;
+    marker.scale.x = 0.05;
+    marker.scale.y = 0.1;
+    marker.scale.z = 0.2;
     marker.color.a = 1.0; // Don't forget to set the alpha!
     marker.color.r = 1.0;
 //     if (id == 2)
