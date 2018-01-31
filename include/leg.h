@@ -14,7 +14,7 @@ typedef iirob_filters::MultiChannelKalmanFilter<double> KalmanFilter;
 int occluded_dead_age = 10;
 double var_obs = 0.25;
 
-int min_predictions = 4;
+int min_predictions = 7;
 int min_observations = 4;
 int state_dimensions = 6;
 
@@ -43,7 +43,10 @@ private:
   int occluded_age;
 
 public:
-  Leg() {}
+  Leg() {
+    legId = -1;
+    occluded_age = 0;
+  }
 
   Leg(unsigned int id, const Point& p)
   {

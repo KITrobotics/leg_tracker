@@ -117,6 +117,8 @@ private:
   int maxClusterSize;
   double clusterTolerance;
 
+  bool isOneTrackingPerson;
+
   int marker_prev_id;
   int next_leg_id;
 
@@ -163,8 +165,6 @@ public:
     nh_.param("x_upper_limit", x_upper_limit, 0.5);
     nh_.param("y_lower_limit", y_lower_limit, -0.5);
     nh_.param("y_upper_limit", y_upper_limit, 0.5);
-    nh_.param("ransac_dist_threshold", ransac_dist_threshold, 0.1);
-    nh_.param("circle_fitting", circle_fitting, std::string("centroid"));
     nh_.param("leg_radius", leg_radius, 0.1);
     nh_.param("min_observations", min_observations, 4);
     nh_.param("min_predictions", min_predictions, 7);
@@ -176,6 +176,8 @@ public:
     nh_.param("minClusterSize", minClusterSize, 3);
     nh_.param("maxClusterSize", maxClusterSize, 100);
     nh_.param("clusterTolerance", clusterTolerance, 0.07);
+    nh_.param("isOneTrackingPerson", isOneTrackingPerson, 0);
+
 
     legs_gathered = id_counter = 0;
     marker_prev_id = -1;
@@ -490,8 +492,8 @@ public:
 
   void predictLeg(int i)
   {
-    ROS_INFO("PredictLeg  legs[i].getPredictions: %d, legs[i].getPeopleId: %d", legs[i].getPredictions(), legs[i].getPeopleId());
-    printLegsInfo();
+    // ROS_INFO("PredictLeg  legs[i].getPredictions: %d, legs[i].getPeopleId: %d", legs[i].getPredictions(), legs[i].getPeopleId());
+    // printLegsInfo();
     if (legs[i].getPredictions() >= min_predictions)
     {
       removeLeg(i);
@@ -500,8 +502,8 @@ public:
     {
       legs[i].predict();
     }
-    ROS_INFO("AFTER predictLeg");
-    printLegsInfo();
+    // ROS_INFO("AFTER predictLeg");
+    // printLegsInfo();
   }
 
 
@@ -541,7 +543,7 @@ public:
   void removeOldMarkers()
   {
     visualization_msgs::MarkerArray ma;
-    for (int i = 0; i < marker_prev_id; i++) {
+    for (int i = 0; i <= marker_prev_id; i++) {
       visualization_msgs::Marker marker;
       marker.header.frame_id = transform_link;
       marker.header.stamp = ros::Time();
@@ -660,7 +662,7 @@ public:
 
   void matchLegCandidates(PointCloud cluster_centroids)
   {
-    printClusterInfo(cluster_centroids);
+    // printClusterInfo(cluster_centroids);
     //PointCloud predictions;
     //predictions.header = cluster_centroids.header;
     //computeKalmanFilterPredictions(predictions);
@@ -674,7 +676,7 @@ public:
       ROS_INFO("There are only predictions!");
       for (int i = 0; i < legs.size(); i++)
       {
-	predictLeg(i);
+         predictLeg(i);
       }
       return;
     }
@@ -701,20 +703,24 @@ public:
       prediction = legs[i].computePrediction();
       //ma.markers.push_back(getMarker(prediction.x, prediction.y, 10, false));
 
-      /*
       double radius = (2 + legs[i].getPredictions()) * leg_radius;
-      if (!findAndEraseMatch(prediction, cluster_centroids, match, radius)) { predictLeg(i); }*/
-
-      Eigen::MatrixXd gate;
-      if (!legs[i].getGatingMatrix(gate)) { ROS_WARN("Could not get the gating matrix!"); predictLeg(i); continue; }
-
-      pubCovarianceAsEllipse(prediction.x, prediction.y, gate);
-
-      if (!findAndEraseMatchWithCov(i, prediction, cluster_centroids, match)) { predictLeg(i); }
+      if (!findAndEraseMatch(prediction, cluster_centroids, match, radius)) { predictLeg(i); }
       else { updateLeg(legs[i], match); }
 
+      // Eigen::MatrixXd gate;
+      // if (!legs[i].getGatingMatrix(gate)) { ROS_WARN("Could not get the gating matrix!"); predictLeg(i); continue; }
+      //
+      // pubCovarianceAsEllipse(prediction.x, prediction.y, gate);
 
+      // if (!findAndEraseMatchWithCov(i, prediction, cluster_centroids, match)) { predictLeg(i); }
+      // else { updateLeg(legs[i], match); }
     }
+
+    for (Point p : cluster_centroids.points)
+    {
+      initLeg(p);
+    }
+  }
 
       /*
 =======
@@ -793,14 +799,14 @@ public:
 
     // if there is enough measurements for legs try to find people
 
-    findPeople();
+    // findPeople();
 
     // save new measurements of legs
-    for (Point p : cluster_centroids.points)
-    {
-      initLeg(p);
-    }
-  }
+  //   for (Point p : cluster_centroids.points)
+  //   {
+  //     initLeg(p);
+  //   }
+  // }
 
 
   bool findAndEraseMatchWithCov(int legIndex, const Point& searchPoint, PointCloud& cloud, Point& out)
@@ -877,8 +883,8 @@ public:
     std::vector<int> indices_of_potential_legs;
     for (int i = fst_leg + 1; i < legs.size(); i++)
     {
-      if (i == fst_leg || legs[i].hasPair() /*|| legs[i].getObservations() < min_observations*/
-	|| distanceBtwTwoPoints(legs[fst_leg].getPos(), legs[i].getPos()) > max_dist_btw_legs)
+      if (i == fst_leg || legs[i].hasPair() || legs[i].getObservations() < min_observations
+	       || distanceBtwTwoPoints(legs[fst_leg].getPos(), legs[i].getPos()) > max_dist_btw_legs)
       {
 	      continue;
       }
@@ -1067,9 +1073,9 @@ public:
     }
   }
 
-  double distanceBtwTwoPoints(Point p, Point r)
+  double distanceBtwTwoPoints(Point p1, Point p2)
   {
-    return std::sqrt(std::pow(p.x - r.x, 2) + std::pow(p.y - r.y, 2));
+    return std::sqrt(std::pow(p1.x - p2.x, 2) + std::pow(p1.y - p2.y, 2));
   }
 
 
@@ -1235,15 +1241,15 @@ public:
     if (cloud.points.size() == 0) { return false; }
     pcl::KdTreeFLANN<Point> kdtree;
     kdtree.setInputCloud (cloud.makeShared());
-    std::vector<int> pointIdxRadius;
-    std::vector<float> pointsSquaredDistRadius;
-    // radius search
-    int count = kdtree.radiusSearch (searchPoint, radius, pointIdxRadius, pointsSquaredDistRadius);
-    if (count == 0) { return false; }
-    if (count > 1)
-    {
-      //interesting more than one point matched
-    }
+    // std::vector<int> pointIdxRadius;
+    // std::vector<float> pointsSquaredDistRadius;
+    // // radius search
+    // int count = kdtree.radiusSearch (searchPoint, radius, pointIdxRadius, pointsSquaredDistRadius);
+    // if (count == 0) { return false; }
+    // if (count > 1)
+    // {
+    //   //interesting more than one point matched
+    // }
     int K = 1;
     std::vector<int> pointsIdx(K);
     std::vector<float> pointsSquaredDist(K);
@@ -1653,7 +1659,7 @@ public:
       }
    }
 
-   void mht(PointCloud& cluster_centroids)
+   void gnn_munkres(PointCloud& cluster_centroids)
    {
       // Filter model predictions
       for(std::list<Leg>::iterator it = legs.begin();
@@ -1796,25 +1802,17 @@ public:
     if (!clustering(filteredCloudXYZ, cluster_centroids)) { predictLegs(); return; }
 
 
-
-    // data association
-    //matchLegCandidates(cluster_centroids);
-    //eraseRemovedLegsWithoutId();
-
-
-    mht(cluster_centroids);
-
-
+    if (isOneTrackingPerson) {
+      matchLegCandidates(cluster_centroids);
+      eraseRemovedLegsWithoutId();
+    } else {
+      gnn_munkres(cluster_centroids);
+    }
+    visLegs();
+    findPeople();
+    vis_people();
 
 //     GNN(cluster_centroids);
-
-
-    visLegs();
-//
-    findPeople();
-
-
-    //vis_people();
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
 
 //     PointCloud::Ptr left(new PointCloud());
@@ -1933,7 +1931,6 @@ public:
   void pub_oval(double x, double y, double scale_x, double scale_y, double orientation_x,
     double orientation_y, double orientation_z, double orientation_w, int id)
   {
-
     visualization_msgs::Marker marker;
     marker.header.frame_id = transform_link;
     marker.header.stamp = ros::Time();
