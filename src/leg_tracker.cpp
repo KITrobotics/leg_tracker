@@ -121,13 +121,12 @@ private:
   int next_leg_id;
 
   //mht
-  std::list<Leg> legs;
-  // std::vector<Leg> legs;
+//   std::list<Leg> legs;
+  std::vector<Leg> legs;
 
 
   //PeopleMap persons;
   std::vector<Leg> removed_legs;
-  std::vector<Leg> legs;
   std::vector<Person> persons;
 //   std::vector<std::pair<Leg, Leg> > persons;
 
@@ -181,15 +180,15 @@ public:
     marker_prev_id = -1;
 
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 1, &LegDetector::processLaserScan, this);
-    sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 10);
-    pcl_cloud_publisher = nh_.advertise<PointCloud> ("scan2pclCloud", 100);
-    vis_pub = nh_.advertise<visualization_msgs::Marker>("leg_circles", 10);
-    pos_vel_acc_lleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_lleg", 10);
-    pos_vel_acc_rleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_rleg", 10);
-    marker_array_pos_publisher = nh_.advertise<visualization_msgs::MarkerArray>("marker_array", 10);
-    marker_array_vel_publisher = nh_.advertise<visualization_msgs::MarkerArray>("marker_array", 10);
-    tracking_area_pub = nh_.advertise<visualization_msgs::Marker>("tracking_area", 10);
-    people_pub = nh_.advertise<visualization_msgs::MarkerArray>("people", 10);
+    sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 300);
+    pcl_cloud_publisher = nh_.advertise<PointCloud> ("scan2pclCloud", 300);
+    vis_pub = nh_.advertise<visualization_msgs::Marker>("leg_circles", 300);
+    pos_vel_acc_lleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_lleg", 300);
+    pos_vel_acc_rleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_rleg", 300);
+    marker_array_pos_publisher = nh_.advertise<visualization_msgs::MarkerArray>("marker_array", 300);
+    marker_array_vel_publisher = nh_.advertise<visualization_msgs::MarkerArray>("marker_array", 300);
+    tracking_area_pub = nh_.advertise<visualization_msgs::Marker>("tracking_area", 300);
+    people_pub = nh_.advertise<visualization_msgs::MarkerArray>("people", 300);
 //
   }
 
@@ -490,8 +489,8 @@ public:
 
   void predictLeg(int i)
   {
-    ROS_INFO("PredictLeg  legs[i].getPredictions: %d, legs[i].getPeopleId: %d", legs[i].getPredictions(), legs[i].getPeopleId());
-    printLegsInfo();
+//     ROS_INFO("PredictLeg  legs[i].getPredictions: %d, legs[i].getPeopleId: %d", legs[i].getPredictions(), legs[i].getPeopleId());
+//     printLegsInfo();
     if (legs[i].getPredictions() >= min_predictions)
     {
       removeLeg(i);
@@ -500,8 +499,8 @@ public:
     {
       legs[i].predict();
     }
-    ROS_INFO("AFTER predictLeg");
-    printLegsInfo();
+//     ROS_INFO("AFTER predictLeg");
+//     printLegsInfo();
   }
 
 
@@ -524,8 +523,8 @@ public:
     int id = 0;
     for (Leg& l : legs)
     {
-      ROS_INFO("VISlegs peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d",
-      l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
+//       ROS_INFO("VISlegs peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d",
+//       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
       cloud.points.push_back(l.getPos());
       ma_leg_pos.markers.push_back(getMarker(l.getPos().x, l.getPos().y, max_id, true));
 //       ma_leg_vel.markers.push_back(getArrowMarker(l.getPos().x + 0.01, l.getPos().y + 0.01,
@@ -562,8 +561,8 @@ public:
     visualization_msgs::MarkerArray ma_leg;
     for (Leg& l : legs)
     {
-      ROS_INFO("VISlegs peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d",
-      l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
+//       ROS_INFO("VISlegs peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d",
+//       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
 
       ma_leg.markers.push_back(getMarker(l.getPos().x, l.getPos().y, marker_prev_id++, true));
       ma_leg.markers.push_back(getArrowMarker(l.getPos().x + 0.01, l.getPos().y + 0.01,
@@ -651,11 +650,11 @@ public:
 
   void printClusterInfo(const PointCloud& cluster_centroids)
   {
-    ROS_INFO("Clusters:");
-    for (int i = 0; i < cluster_centroids.points.size(); i++)
-    {
-      ROS_INFO("cluster %d: (%f, %f)", i, cluster_centroids.points[i].x, cluster_centroids.points[i].y);
-    }
+//     ROS_INFO("Clusters:");
+//     for (int i = 0; i < cluster_centroids.points.size(); i++)
+//     {
+//       ROS_INFO("cluster %d: (%f, %f)", i, cluster_centroids.points[i].x, cluster_centroids.points[i].y);
+//     }
   }
 
   void matchLegCandidates(PointCloud cluster_centroids)
@@ -849,6 +848,7 @@ public:
 	if (legs[i].getPeopleId() == legs[j].getPeopleId()) {
 	  if (distanceBtwTwoPoints(legs[i].getPos(), legs[j].getPos()) > max_dist_btw_legs)
 	  {
+	    ROS_INFO("separate leg %d and %d", i, j);
 	    separateLegs(i, j);
 	  }
 	  break;
@@ -859,7 +859,7 @@ public:
 
   void findPeople()
   {
-    ROS_INFO("findPeople");
+//     ROS_INFO("findPeople");
     checkDistanceOfLegs();
     for (int i = 0; i < legs.size(); i++)
     {
@@ -872,7 +872,7 @@ public:
 
   void findSecondLeg(int fst_leg)
   {
-    ROS_INFO("findSecondLeg");
+//     ROS_INFO("findSecondLeg");
     //PointCloud potential_legs;
     std::vector<int> indices_of_potential_legs;
     for (int i = fst_leg + 1; i < legs.size(); i++)
@@ -1180,7 +1180,7 @@ public:
   void vis_people()
   {
     visualization_msgs::MarkerArray ma_people;
-    int max_id = 0;
+//     int max_id = 0;
 
     for (int i = 0; i < legs.size(); i++)
     {
@@ -1194,12 +1194,12 @@ public:
 		{
 			if (l.getPeopleId() == id)
 			{
-			  ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x, legs[i].getPos().y, l.getPos().x, l.getPos().y, max_id));
-			  max_id++;
+			  ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x, legs[i].getPos().y, l.getPos().x, l.getPos().y, marker_prev_id++));
+// 			  max_id++;
 
-			  ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2removed: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
-			  id, legs[i].getPos().x, legs[i].getPos().y, l.getPos().x, l.getPos().y, legs[i].getPredictions(), l.getPredictions(),
-				   legs[i].getObservations(), l.getObservations(), legs[i].hasPair(), l.hasPair());
+// 			  ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2removed: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
+// 			  id, legs[i].getPos().x, legs[i].getPos().y, l.getPos().x, l.getPos().y, legs[i].getPredictions(), l.getPredictions(),
+// 				   legs[i].getObservations(), l.getObservations(), legs[i].hasPair(), l.hasPair());
 			}
 		}
 
@@ -1211,15 +1211,15 @@ public:
 	{
 	  if (legs[j].getPeopleId() == id)
 	  {
-	    ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x, legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, max_id));
-	    max_id++;
+	    ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x, legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, marker_prev_id++));
+// 	    max_id++;
 
-	    ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
-	    id, legs[i].getPos().x, legs[i].getPos().y,
-		     legs[j].getPos().x, legs[j].getPos().y,
-		     legs[i].getPredictions(), legs[j].getPredictions(),
-		      legs[i].getObservations(), legs[j].getObservations(),
-		     legs[i].hasPair(), legs[j].hasPair());
+// 	    ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
+// 	    id, legs[i].getPos().x, legs[i].getPos().y,
+// 		     legs[j].getPos().x, legs[j].getPos().y,
+// 		     legs[i].getPredictions(), legs[j].getPredictions(),
+// 		      legs[i].getObservations(), legs[j].getObservations(),
+// 		     legs[i].hasPair(), legs[j].hasPair());
 	  }
 	}
       }
@@ -1652,35 +1652,57 @@ public:
 	}
       }
    }
+   
+   std::vector<Leg> removeLegFromVector(std::vector<Leg>& v, int i)
+   {
+      Leg l = v[v.size() - 1];
+      v[i] = l;
+      v.pop_back();
+      return v;
+   }
 
    void mht(PointCloud& cluster_centroids)
    {
       // Filter model predictions
-      for(std::list<Leg>::iterator it = legs.begin();
+      for(std::vector<Leg>::iterator it = legs.begin();
           it != legs.end(); it++) {
            it->predict();
       }
-      std::list<Leg> fused;
+      std::vector<Leg> fused;
 
       assign_munkres(cluster_centroids, legs, fused);
 
       // Cull dead entities
-      std::list<Leg>::iterator it = fused.begin();
-      while(it != fused.end()) {
-           if (it->is_dead()) {
-                it = fused.erase(it);
+      int i = 0;
+      while(i != fused.size()) {
+           if (fused[i].is_dead()) {
+                fused = removeLegFromVector(fused, i);
            } else {
-                it++;
+                i++;
            }
       }
+//       for (int i = 0; i < fused.size(); i++) {
+// 	if (i == fused.size()) { break; }
+// 	if (fused[i].is_dead()) {
+//                 fused = removeLegFromVector(i);
+// 		i--;
+//            } 
+//       }
+//       std::vector<Leg>::iterator it = fused.begin();
+//       while(it != fused.end()) {
+//            if (it->is_dead()) {
+//                 it = fused.erase(it);
+//            } else {
+//                 it++;
+//            }
+//       }
 
-      // Copy fused to legs
       legs = fused;
    }
 
    void assign_munkres(const PointCloud& meas,
-                         std::list<Leg> &tracks,
-                         std::list<Leg> &fused)
+                         std::vector<Leg> &tracks,
+                         std::vector<Leg> &fused)
    {
        // Create cost matrix between previous and current blob centroids
        int meas_count = meas.points.size();
@@ -1700,7 +1722,7 @@ public:
        // Previous tracks are along x-axis (top-side)
        int r = 0;
        for(const Point& p : meas.points) {
-            std::list<Leg>::iterator it_prev = tracks.begin();
+            std::vector<Leg>::iterator it_prev = tracks.begin();
             int c = 0;
             for (; it_prev != tracks.end(); it_prev++, c++) {
               // if (it_prev->isPerson() and not it_prev->isInFreeSpace()) {
@@ -1725,7 +1747,7 @@ public:
        // Use the assignment to update the old tracks with new blob measurement
        int meas_it = 0;
        for(r = 0; r < rows; r++) {
-            std::list<Leg>::iterator it_prev = tracks.begin();
+            std::vector<Leg>::iterator it_prev = tracks.begin();
             for (int c = 0; c < cols; c++) {
                  if (matrix(r,c) == 0) {
                       if (r < meas_count && c < tracks_count) {
@@ -1814,7 +1836,7 @@ public:
     findPeople();
 
 
-    //vis_people();
+    vis_people();
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
 
 //     PointCloud::Ptr left(new PointCloud());
