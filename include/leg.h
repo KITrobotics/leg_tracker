@@ -14,7 +14,7 @@ typedef iirob_filters::MultiChannelKalmanFilter<double> KalmanFilter;
 int occluded_dead_age = 10;
 double var_obs = 0.25;
 
-int min_predictions = 4;
+int min_predictions = 7;
 int min_observations = 4;
 int state_dimensions = 6;
 
@@ -43,13 +43,21 @@ private:
   int occluded_age;
 
 public:
-  Leg() {}
+  Leg() {
+    legId = -1;
+    occluded_age = 0;
+  }
 
   Leg(unsigned int id, const Point& p)
   {
     legId = id;
     occluded_age = 0;
     configure(p);
+  }
+  
+  unsigned int getLegId()
+  { 
+    return legId;
   }
 
   bool configure(int dimensions, int min_preds, int min_obs, const Point& p)
@@ -61,7 +69,8 @@ public:
     peopleId = -1;
     pos = p;
     hasPair_ = false;
-    predictions = observations = 0;
+    predictions = 0;
+    observations = 1;
 
     std::vector<double> in;
     // position
@@ -164,8 +173,25 @@ public:
     //state = prediction;
     updateHistory(prediction);
   }
+  
+  void predictForGNN()
+  {
+    std::vector<double> prediction;
+    filter->predict(prediction);
+    if (prediction.size() != state_dimensions) { ROS_ERROR("Leg.h: Prediction vector size is too small!"); return; }
+    pos.x = prediction[0];
+    pos.y = prediction[1];
+    vel.x = prediction[2];
+    vel.y = prediction[3];
+    acc.x = prediction[4];
+    acc.y = prediction[5];
+//     if (predictions < min_predictions) { predictions++; }
+//     observations = 0;
+    //state = prediction;
+    updateHistory(prediction);
+  }
 
-  void update(const Point& p)
+  void updateForGNN(const Point& p)
   {
     std::vector<double> in, out;
     in.push_back(p.x); in.push_back(p.y);
@@ -177,9 +203,11 @@ public:
     vel.y = out[3];
     acc.x = out[4];
     acc.y = out[5];
-    predictions = 0;
+//     predictions = 0;
+//     ROS_WARN("HIER: obs: %d, pred: %d", observations, predictions);
     if (observations < min_observations) { observations++; }
     //state = out;
+    history.pop_back();
     updateHistory(out);
   }
 

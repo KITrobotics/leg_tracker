@@ -83,8 +83,7 @@ private:
   ros::Publisher pcl_cloud_publisher;
   ros::Publisher pos_vel_acc_lleg_pub;
   ros::Publisher pos_vel_acc_rleg_pub;
-  ros::Publisher marker_array_pos_publisher;
-  ros::Publisher marker_array_vel_publisher;
+  ros::Publisher legs_and_vel_direction_publisher;
   ros::Publisher tracking_area_pub;
   ros::Publisher people_pub;
 
@@ -117,7 +116,10 @@ private:
   int maxClusterSize;
   double clusterTolerance;
 
-  int marker_prev_id;
+  bool isOnePersonToTrack;
+
+  int legs_marker_next_id;
+  int people_marker_next_id;
   int next_leg_id;
 
   //mht
@@ -162,8 +164,6 @@ public:
     nh_.param("x_upper_limit", x_upper_limit, 0.5);
     nh_.param("y_lower_limit", y_lower_limit, -0.5);
     nh_.param("y_upper_limit", y_upper_limit, 0.5);
-    nh_.param("ransac_dist_threshold", ransac_dist_threshold, 0.1);
-    nh_.param("circle_fitting", circle_fitting, std::string("centroid"));
     nh_.param("leg_radius", leg_radius, 0.1);
     nh_.param("min_observations", min_observations, 4);
     nh_.param("min_predictions", min_predictions, 7);
@@ -175,9 +175,10 @@ public:
     nh_.param("minClusterSize", minClusterSize, 3);
     nh_.param("maxClusterSize", maxClusterSize, 100);
     nh_.param("clusterTolerance", clusterTolerance, 0.07);
+    nh_.param("isOnePersonToTrack", isOnePersonToTrack, false);
 
-    legs_gathered = id_counter = 0;
-    marker_prev_id = -1;
+
+    legs_gathered = id_counter = legs_marker_next_id = next_leg_id = people_marker_next_id = 0;
 
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 1, &LegDetector::processLaserScan, this);
     sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 300);
@@ -185,8 +186,7 @@ public:
     vis_pub = nh_.advertise<visualization_msgs::Marker>("leg_circles", 300);
     pos_vel_acc_lleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_lleg", 300);
     pos_vel_acc_rleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_rleg", 300);
-    marker_array_pos_publisher = nh_.advertise<visualization_msgs::MarkerArray>("marker_array", 300);
-    marker_array_vel_publisher = nh_.advertise<visualization_msgs::MarkerArray>("marker_array", 300);
+    legs_and_vel_direction_publisher = nh_.advertise<visualization_msgs::MarkerArray>("legs_and_vel_direction", 300);
     tracking_area_pub = nh_.advertise<visualization_msgs::Marker>("tracking_area", 300);
     people_pub = nh_.advertise<visualization_msgs::MarkerArray>("people", 300);
 //
@@ -489,8 +489,8 @@ public:
 
   void predictLeg(int i)
   {
-//     ROS_INFO("PredictLeg  legs[i].getPredictions: %d, legs[i].getPeopleId: %d", legs[i].getPredictions(), legs[i].getPeopleId());
-//     printLegsInfo();
+    // ROS_INFO("PredictLeg  legs[i].getPredictions: %d, legs[i].getPeopleId: %d", legs[i].getPredictions(), legs[i].getPeopleId());
+    // printLegsInfo();
     if (legs[i].getPredictions() >= min_predictions)
     {
       removeLeg(i);
@@ -499,18 +499,17 @@ public:
     {
       legs[i].predict();
     }
-//     ROS_INFO("AFTER predictLeg");
-//     printLegsInfo();
+    // ROS_INFO("AFTER predictLeg");
+    // printLegsInfo();
   }
 
 
   void printLegsInfo()
   {
-	int people = 0;
     for (Leg& l : legs)
     {
-      ROS_INFO("peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d",
-      l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
+      ROS_INFO("legId: %d, peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d",
+      l.getLegId(), l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
     }
   }
 
@@ -532,15 +531,15 @@ public:
       max_id++;
       id++;
     }
-    marker_array_pos_publisher.publish(ma_leg_pos);
+    legs_and_vel_direction_publisher.publish(ma_leg_pos);
 //     marker_array_vel_publisher.publish(ma_leg_vel);
     pcl_cloud_publisher.publish(cloud.makeShared());
   }
 
-  void removeOldMarkers()
+  void removeOldMarkers(int nextId, ros::Publisher ma_publisher)
   {
     visualization_msgs::MarkerArray ma;
-    for (int i = 0; i < marker_prev_id; i++) {
+    for (int i = 0; i < nextId; i++) {
       visualization_msgs::Marker marker;
       marker.header.frame_id = transform_link;
       marker.header.stamp = ros::Time();
@@ -549,14 +548,14 @@ public:
       marker.action = visualization_msgs::Marker::DELETE;
       ma.markers.push_back(marker);
     }
-    marker_array_pos_publisher.publish(ma);
+    legs_and_vel_direction_publisher.publish(ma);
   }
 
   void visLegs()
   {
-    if (marker_prev_id != -1) {
-      removeOldMarkers();
-      marker_prev_id = 0;
+    if (legs_marker_next_id != 0) {
+      removeOldMarkers(legs_marker_next_id, legs_and_vel_direction_publisher);
+      legs_marker_next_id = 0;
     }
     visualization_msgs::MarkerArray ma_leg;
     for (Leg& l : legs)
@@ -564,11 +563,11 @@ public:
 //       ROS_INFO("VISlegs peopleId: %d, pos: (%f, %f), predictions: %d, observations: %d, hasPair: %d",
 //       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getPredictions(), l.getObservations(), l.hasPair());
 
-      ma_leg.markers.push_back(getMarker(l.getPos().x, l.getPos().y, marker_prev_id++, true));
-      ma_leg.markers.push_back(getArrowMarker(l.getPos().x + 0.01, l.getPos().y + 0.01,
-	       l.getPos().x + 0.5 * l.getVel().x + 0.01, l.getPos().y + 0.5 * l.getVel().y + 0.01, marker_prev_id++));
+      ma_leg.markers.push_back(getMarker(l.getPos().x, l.getPos().y, legs_marker_next_id++, true));
+      ma_leg.markers.push_back(getArrowMarker(l.getPos().x, l.getPos().y,
+	       l.getPos().x + 0.5 * l.getVel().x, l.getPos().y + 0.5 * l.getVel().y, legs_marker_next_id++));
     }
-    marker_array_pos_publisher.publish(ma_leg);
+    legs_and_vel_direction_publisher.publish(ma_leg);
   }
 
 
@@ -592,13 +591,13 @@ public:
     geometry_msgs::Point start, end;
     start.x = start_x;
     start.y = start_y;
-    start.z = z_coordinate - 0.01;
+    start.z = z_coordinate;
     end.x = end_x;
     end.y = end_y;
-    end.z = z_coordinate - 0.01;
+    end.z = z_coordinate;
     marker.pose.position.x = 0.;
     marker.pose.position.y = 0.;
-    marker.pose.position.z = z_coordinate - 0.1;
+    marker.pose.position.z = z_coordinate;
     marker.points.push_back(start);
     marker.points.push_back(end);
     marker.scale.x = 0.05;
@@ -659,7 +658,7 @@ public:
 
   void matchLegCandidates(PointCloud cluster_centroids)
   {
-    printClusterInfo(cluster_centroids);
+    // printClusterInfo(cluster_centroids);
     //PointCloud predictions;
     //predictions.header = cluster_centroids.header;
     //computeKalmanFilterPredictions(predictions);
@@ -673,7 +672,7 @@ public:
       ROS_INFO("There are only predictions!");
       for (int i = 0; i < legs.size(); i++)
       {
-	predictLeg(i);
+         predictLeg(i);
       }
       return;
     }
@@ -700,20 +699,24 @@ public:
       prediction = legs[i].computePrediction();
       //ma.markers.push_back(getMarker(prediction.x, prediction.y, 10, false));
 
-      /*
       double radius = (2 + legs[i].getPredictions()) * leg_radius;
-      if (!findAndEraseMatch(prediction, cluster_centroids, match, radius)) { predictLeg(i); }*/
-
-      Eigen::MatrixXd gate;
-      if (!legs[i].getGatingMatrix(gate)) { ROS_WARN("Could not get the gating matrix!"); predictLeg(i); continue; }
-
-      pubCovarianceAsEllipse(prediction.x, prediction.y, gate);
-
-      if (!findAndEraseMatchWithCov(i, prediction, cluster_centroids, match)) { predictLeg(i); }
+      if (!findAndEraseMatch(prediction, cluster_centroids, match, radius)) { predictLeg(i); }
       else { updateLeg(legs[i], match); }
 
+      // Eigen::MatrixXd gate;
+      // if (!legs[i].getGatingMatrix(gate)) { ROS_WARN("Could not get the gating matrix!"); predictLeg(i); continue; }
+      //
+      // pubCovarianceAsEllipse(prediction.x, prediction.y, gate);
 
+      // if (!findAndEraseMatchWithCov(i, prediction, cluster_centroids, match)) { predictLeg(i); }
+      // else { updateLeg(legs[i], match); }
     }
+
+    for (Point p : cluster_centroids.points)
+    {
+      initLeg(p);
+    }
+  }
 
       /*
 =======
@@ -785,21 +788,20 @@ public:
       }
 
       legs = newLegs;
-<<<<<<< HEAD
 	*/
 //     }
-//     marker_array_publisher.publish(ma);
+//     legs_and_vel_direction_publisher.publish(ma);
 
     // if there is enough measurements for legs try to find people
 
-    findPeople();
+    // findPeople();
 
     // save new measurements of legs
-    for (Point p : cluster_centroids.points)
-    {
-      initLeg(p);
-    }
-  }
+  //   for (Point p : cluster_centroids.points)
+  //   {
+  //     initLeg(p);
+  //   }
+  // }
 
 
   bool findAndEraseMatchWithCov(int legIndex, const Point& searchPoint, PointCloud& cloud, Point& out)
@@ -877,8 +879,8 @@ public:
     std::vector<int> indices_of_potential_legs;
     for (int i = fst_leg + 1; i < legs.size(); i++)
     {
-      if (i == fst_leg || legs[i].hasPair() /*|| legs[i].getObservations() < min_observations*/
-	|| distanceBtwTwoPoints(legs[fst_leg].getPos(), legs[i].getPos()) > max_dist_btw_legs)
+      if (i == fst_leg || legs[i].hasPair() || legs[i].getObservations() < min_observations
+	       || distanceBtwTwoPoints(legs[fst_leg].getPos(), legs[i].getPos()) > max_dist_btw_legs)
       {
 	      continue;
       }
@@ -1067,9 +1069,9 @@ public:
     }
   }
 
-  double distanceBtwTwoPoints(Point p, Point r)
+  double distanceBtwTwoPoints(Point p1, Point p2)
   {
-    return std::sqrt(std::pow(p.x - r.x, 2) + std::pow(p.y - r.y, 2));
+    return std::sqrt(std::pow(p1.x - p2.x, 2) + std::pow(p1.y - p2.y, 2));
   }
 
 
@@ -1179,6 +1181,10 @@ public:
 
   void vis_people()
   {
+    if (people_marker_next_id != 0) {
+      removeOldMarkers(people_marker_next_id, people_pub);
+      people_marker_next_id = 0;
+    }
     visualization_msgs::MarkerArray ma_people;
 //     int max_id = 0;
 
@@ -1194,7 +1200,8 @@ public:
 		{
 			if (l.getPeopleId() == id)
 			{
-			  ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x, legs[i].getPos().y, l.getPos().x, l.getPos().y, marker_prev_id++));
+			  ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x, 
+				legs[i].getPos().y, l.getPos().x, l.getPos().y, people_marker_next_id++));
 // 			  max_id++;
 
 // 			  ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2removed: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
@@ -1211,7 +1218,8 @@ public:
 	{
 	  if (legs[j].getPeopleId() == id)
 	  {
-	    ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x, legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, marker_prev_id++));
+	    ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x, 
+		legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, people_marker_next_id++));
 // 	    max_id++;
 
 // 	    ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
@@ -1235,15 +1243,15 @@ public:
     if (cloud.points.size() == 0) { return false; }
     pcl::KdTreeFLANN<Point> kdtree;
     kdtree.setInputCloud (cloud.makeShared());
-    std::vector<int> pointIdxRadius;
-    std::vector<float> pointsSquaredDistRadius;
-    // radius search
-    int count = kdtree.radiusSearch (searchPoint, radius, pointIdxRadius, pointsSquaredDistRadius);
-    if (count == 0) { return false; }
-    if (count > 1)
-    {
-      //interesting more than one point matched
-    }
+    // std::vector<int> pointIdxRadius;
+    // std::vector<float> pointsSquaredDistRadius;
+    // // radius search
+    // int count = kdtree.radiusSearch (searchPoint, radius, pointIdxRadius, pointsSquaredDistRadius);
+    // if (count == 0) { return false; }
+    // if (count > 1)
+    // {
+    //   //interesting more than one point matched
+    // }
     int K = 1;
     std::vector<int> pointsIdx(K);
     std::vector<float> pointsSquaredDist(K);
@@ -1661,12 +1669,12 @@ public:
       return v;
    }
 
-   void mht(PointCloud& cluster_centroids)
+   void gnn_munkres(PointCloud& cluster_centroids)
    {
       // Filter model predictions
       for(std::vector<Leg>::iterator it = legs.begin();
           it != legs.end(); it++) {
-           it->predict();
+           it->predictForGNN();
       }
       std::vector<Leg> fused;
 
@@ -1758,7 +1766,7 @@ public:
                                 // with the track ID and age of older track. Add
                                 // to fused list
                                 //it->matched_track(*it_prev);
-                                it_prev->update(meas.points[meas_it]);
+                                it_prev->updateForGNN(meas.points[meas_it]);
                                 fused.push_back(*it_prev);
                            } else {
                                 // TOO MUCH OF A JUMP IN POSITION
@@ -1818,25 +1826,22 @@ public:
     if (!clustering(filteredCloudXYZ, cluster_centroids)) { predictLegs(); return; }
 
 
-
-    // data association
-    //matchLegCandidates(cluster_centroids);
-    //eraseRemovedLegsWithoutId();
-
-
-    mht(cluster_centroids);
-
-
-
-//     GNN(cluster_centroids);
-
-
+    if (isOnePersonToTrack) {
+      matchLegCandidates(cluster_centroids);
+      eraseRemovedLegsWithoutId();
+    } else {
+      ROS_WARN("vor: ");
+      printLegsInfo();
+      gnn_munkres(cluster_centroids);
+      ROS_WARN("nach: ");
+      printLegsInfo();
+    }
     visLegs();
-//
-    findPeople();
-
-
-    vis_people();
+    if (isOnePersonToTrack) { 
+      findPeople(); 
+      vis_people();
+    }
+//     GNN(cluster_centroids);
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
 
 //     PointCloud::Ptr left(new PointCloud());
@@ -1955,7 +1960,6 @@ public:
   void pub_oval(double x, double y, double scale_x, double scale_y, double orientation_x,
     double orientation_y, double orientation_z, double orientation_w, int id)
   {
-
     visualization_msgs::Marker marker;
     marker.header.frame_id = transform_link;
     marker.header.stamp = ros::Time();
