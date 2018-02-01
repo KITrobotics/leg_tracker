@@ -1,18 +1,18 @@
 scan_topic: /base_laser_rear/scan
 transform_link: base_link
-#x_lower_limit: -2.6
-x_lower_limit: -2.4
-#x_upper_limit: 1.0
-x_upper_limit: 0.0
-#y_lower_limit: -1.0
+x_lower_limit: -2.6
+#x_lower_limit: -2.4
+x_upper_limit: 1.0
+#x_upper_limit: 0.0
 y_lower_limit: -1.0
-#y_upper_limit: 2.8
-y_upper_limit: 1.0
+#y_lower_limit: -1.0
+y_upper_limit: 2.8
+#y_upper_limit: 1.0
 ransac_dist_threshold: 0.01
 circle_fitting: centroid # ransac or centroid
 leg_radius: 0.1
 min_observations: 4
-min_predictions: 5
+min_predictions: 4
 max_dist_btw_legs: 0.8
 z_coordinate: 0.178
 vel_stance_threshold: 0.47

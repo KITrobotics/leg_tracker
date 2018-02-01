@@ -109,8 +109,6 @@ public:
     Eigen::VectorXd diff = in - state;
     Eigen::MatrixXd dist_mat = diff.transpose()*B.inverse()*diff;
     double dist = dist_mat(0,0);
-    //if (dist <= pow(nsigma,2)) {
-                ROS_WARN("5!");
     if (dist <= std) {
          return true;
     } else {
@@ -172,6 +170,17 @@ public:
     std::vector<double> in, out;
     in.push_back(p.x); in.push_back(p.y);
     filter->update(in, out);
+    if (out.size() != state_dimensions) { ROS_ERROR("Leg.h: Update out vector size is too small!"); return; }
+    pos.x = out[0];
+    pos.y = out[1];
+    vel.x = out[2];
+    vel.y = out[3];
+    acc.x = out[4];
+    acc.y = out[5];
+    predictions = 0;
+    if (observations < min_observations) { observations++; }
+    //state = out;
+    updateHistory(out);
   }
 
   void update(const std::vector<double>& in, std::vector<double>& out)
