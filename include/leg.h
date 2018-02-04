@@ -12,9 +12,8 @@ typedef iirob_filters::MultiChannelKalmanFilter<double> KalmanFilter;
 
 
 int occluded_dead_age = 10;
-double var_obs = 0.25;
+double variance_observation = 0.25;
 
-int min_predictions = 7;
 int min_observations = 4;
 int state_dimensions = 6;
 
@@ -32,9 +31,8 @@ private:
   Point pos;
   Point vel, acc;
   //std::vector<double> state;
-  int predictions;
   int observations;
-  bool hasPair_;
+  bool hasPair;
   // int min_predictions;
   // int min_observations;
   // int state_dimensions;
@@ -43,68 +41,39 @@ private:
   int occluded_age;
 
 public:
-  Leg() {
-    legId = -1;
+  Leg() {} = delete;
+
+  Leg(unsigned int legId, const Point& pos, int occluded_dead_age = 10,
+    double variance_observation = 0.25, int min_observations = 4,
+    int state_dimensions = 6)
+  {
+    this->legId = id;
     occluded_age = 0;
+    this->pos = pos;
+    this->occluded_dead_age = occluded_dead_age;
+    this->variance_observation = variance_observation;
+    this->min_observations = min_observations;
+    this->state_dimensions = state_dimensions;
+
+    peopleId = -1;
+    hasPair = false;
+    observations = 0;
+
+    std::vector<double> in;
+    // position
+    in.push_back(p.x); in.push_back(p.y);
+    // velocity
+    in.push_back(0.0); in.push_back(0.0);
+    // acceleration
+    in.push_back(0.0); in.push_back(0.0);
+
+    filter = new KalmanFilter();
+    if (!filter->configure(in)) { ROS_ERROR("Leg.h: Configure of filter has failed!"); }
   }
 
-  Leg(unsigned int id, const Point& p)
-  {
-    legId = id;
-    occluded_age = 0;
-    configure(p);
-  }
-  
   unsigned int getLegId()
-  { 
+  {
     return legId;
-  }
-
-  bool configure(int dimensions, int min_preds, int min_obs, const Point& p)
-  {
-  //   state_dimensions = dimensions;
-  //   min_predictions = min_preds;
-  //   min_observations = min_obs;
-
-    peopleId = -1;
-    pos = p;
-    hasPair_ = false;
-    predictions = 0;
-    observations = 1;
-
-    std::vector<double> in;
-    // position
-    in.push_back(p.x); in.push_back(p.y);
-    // velocity
-    in.push_back(0.0); in.push_back(0.0);
-    // acceleration
-    in.push_back(0.0); in.push_back(0.0);
-
-    filter = new KalmanFilter();
-    bool result = filter->configure(in);
-    if (!result) { ROS_ERROR("Leg.h: Configure of filter has failed!"); }
-    return result;
-  }
-
-  bool configure(const Point& p)
-  {
-    peopleId = -1;
-    pos = p;
-    hasPair_ = false;
-    predictions = observations = 0;
-
-    std::vector<double> in;
-    // position
-    in.push_back(p.x); in.push_back(p.y);
-    // velocity
-    in.push_back(0.0); in.push_back(0.0);
-    // acceleration
-    in.push_back(0.0); in.push_back(0.0);
-
-    filter = new KalmanFilter();
-    bool result = filter->configure(in);
-    if (!result) { ROS_ERROR("Leg.h: Configure of filter has failed!"); }
-    return result;
   }
 
   bool is_within_region(const Point& p, double std)
@@ -116,7 +85,7 @@ public:
     Eigen::MatrixXd B;
     if (!filter->getGatingMatrix(B)) { return false; }
     Eigen::VectorXd diff = in - state;
-    Eigen::MatrixXd dist_mat = diff.transpose()*B.inverse()*diff;
+    Eigen::MatrixXd dist_mat = diff.transpose() * B.inverse() * diff;
     double dist = dist_mat(0,0);
     if (dist <= std) {
          return true;
@@ -136,7 +105,7 @@ public:
     Eigen::MatrixXd cov;
     if (!filter->getCovarianceMatrix(cov)) { ROS_ERROR("Leg.h: getCovarianceMatrix() has failed!"); return result; }
     result = cov(0, 0);
-    result += var_obs;
+    result += variance_observation;
     return result;
   }
 
@@ -146,15 +115,6 @@ public:
            return true;
       }
       return false;
-  }
-
-  Point computePrediction()
-  {
-    std::vector<double> prediction;
-    filter->computePrediction(prediction);
-    Point p;
-    if (prediction.size() == state_dimensions) { p.x = prediction[0]; p.y = prediction[1]; }
-    return p;
   }
 
   void predict()
@@ -168,26 +128,6 @@ public:
     vel.y = prediction[3];
     acc.x = prediction[4];
     acc.y = prediction[5];
-    if (predictions < min_predictions) { predictions++; }
-    observations = 0;
-    //state = prediction;
-    updateHistory(prediction);
-  }
-  
-  void predictForGNN()
-  {
-    std::vector<double> prediction;
-    filter->predict(prediction);
-    if (prediction.size() != state_dimensions) { ROS_ERROR("Leg.h: Prediction vector size is too small!"); return; }
-    pos.x = prediction[0];
-    pos.y = prediction[1];
-    vel.x = prediction[2];
-    vel.y = prediction[3];
-    acc.x = prediction[4];
-    acc.y = prediction[5];
-//     if (predictions < min_predictions) { predictions++; }
-//     observations = 0;
-    //state = prediction;
     updateHistory(prediction);
   }
 
@@ -203,27 +143,8 @@ public:
     vel.y = out[3];
     acc.x = out[4];
     acc.y = out[5];
-//     predictions = 0;
-//     ROS_WARN("HIER: obs: %d, pred: %d", observations, predictions);
     if (observations < min_observations) { observations++; }
-    //state = out;
-    history.pop_back();
-    updateHistory(out);
-  }
-
-  void update(const std::vector<double>& in, std::vector<double>& out)
-  {
-    filter->update(in, out);
-    if (out.size() != state_dimensions) { ROS_ERROR("Leg.h: Update out vector size is too small!"); return; }
-    pos.x = out[0];
-    pos.y = out[1];
-    vel.x = out[2];
-    vel.y = out[3];
-    acc.x = out[4];
-    acc.y = out[5];
-    predictions = 0;
-    if (observations < min_observations) { observations++; }
-    //state = out;
+    history.pop_back(); // remove last prediction becaufe there is an update
     updateHistory(out);
   }
 
@@ -238,11 +159,6 @@ public:
   std::list<std::vector<double> > getHistory()
   {
     return history;
-  }
-
-  int getPredictions()
-  {
-    return predictions;
   }
 
   Point getPos()
@@ -272,15 +188,15 @@ public:
 
   void setHasPair(bool value)
   {
-	  hasPair_ = value;
+	  hasPair = value;
   }
 
   bool hasPair()
   {
-	  return hasPair_;
+	  return hasPair;
   }
 
-  bool getGatingMatrix(Eigen::MatrixXd& data_out)
+   bool getGatingMatrix(Eigen::MatrixXd& data_out)
   {
     if (!filter->getGatingMatrix(data_out)) { return false; }
     return true;

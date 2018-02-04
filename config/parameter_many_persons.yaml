@@ -16,4 +16,7 @@ clusterTolerance: 0.07
 minClusterSize: 3
 maxClusterSize: 100
 isOnePersonToTrack: false
+max_nn_gating_distance: 1.0
+occluded_dead_age: 10
+variance_observation: 0.25
 #history_size: 5
