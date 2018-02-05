@@ -1848,6 +1848,7 @@ public:
     ROS_WARN("nach: ");
     printLegsInfo();
     visLegs();
+    checkDistanceOfLegs();
     findPeople();
     vis_people();
 //     GNN(cluster_centroids);
