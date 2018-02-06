@@ -8,80 +8,105 @@
 class Person
 {
 
-// const static int z_coord = 0.178;
-
 
 private:
-  int peopleId;
+  unsigned int peopleId;
   KalmanFilter* filter;
   Point pos;
-  int predictions;
   int observations;
-  int min_predictions;
   int min_observations;
-  Leg *left, *right;
+  unsigned int l1, l2;
+  int occluded_age;
+  int occluded_dead_age;
+  double variance_observation;
+  std::vector<double> state;
 //   bool isRemoved;
 
 public:
-  Person() {}
-
-  bool configure(int min_preds, int min_obs, Point p, Leg* l, Leg* r)
+  Person(unsigned int peopleId, const Point& pos, int occluded_dead_age = 10,
+    double variance_observation = 0.25, int min_observations = 4) 
   {
+    this->peopleId = peopleId;
+    occluded_age = 0;
+    this->pos = pos;
+    this->occluded_dead_age = occluded_dead_age;
+    this->variance_observation = variance_observation;
+    this->min_observations = min_observations;
+    observations = 0;
     
-    min_predictions = min_preds;
-    min_observations = min_obs;
-    
-    peopleId = -1;
-    pos = p;
-    predictions = observations = 0;
-    left = l;
-    right = r;
-
-    std::vector<double> in;
     // position
-    in.push_back(p.x); in.push_back(p.y);
+    state.push_back(pos.x); state.push_back(pos.y);
     // velocity
-    in.push_back(0.0); in.push_back(0.0);
+    state.push_back(0.0); state.push_back(0.0);
     // acceleration
-    in.push_back(0.0); in.push_back(0.0);
+    state.push_back(0.0); state.push_back(0.0);
 
     filter = new KalmanFilter();
-    bool result = filter->configure(in);
-    if (!result) { ROS_ERROR("Configure of filter has failed!"); }
-    return result;
+    if (!filter->configure(state)) { ROS_ERROR("Leg.h: Configure of filter has failed!"); }
+  }
+  
+  void missed()
+  {
+    occluded_age++;
+    observations = 0;
   }
 
-  Point computePrediction()
+  bool is_dead()
   {
-    std::vector<double> prediction;
-    filter->computePrediction(prediction);
-    Point p;
-    if (prediction.size() >= 2) { p.x = prediction[0]; p.y = prediction[1]; }
-    return p;
+      if (occluded_age > occluded_dead_age) {
+           return true;
+      }
+      return false;
+  }
+
+  bool is_within_region(const Point& p, double std)
+  {
+    Eigen::VectorXd in(2);
+    in << p.x, p.y;
+    Eigen::VectorXd state(2);
+    state << pos.x, pos.y;
+    Eigen::MatrixXd B;
+    if (!filter->getGatingMatrix(B)) { return false; }
+    Eigen::VectorXd diff = in - state;
+    Eigen::MatrixXd dist_mat = diff.transpose() * B.inverse() * diff;
+    double dist = dist_mat(0,0);
+    if (dist <= std) {
+         return true;
+    } else {
+         return false;
+    }
   }
 
   void predict()
   {
     std::vector<double> prediction;
     filter->predict(prediction);
-    if (prediction.size() >= 2) { pos.x = prediction[0]; pos.y = prediction[1]; }
-    if (predictions < min_predictions) { predictions++; }
-    observations = 0;
+    pos.x = prediction[0]; 
+    pos.y = prediction[1]; 
+    state = prediction;
   }
 
-  void update(const std::vector<double>& in, std::vector<double>& out)
+  void update(const Point& p)
   {
+    std::vector<double> in, out;
+    in.push_back(p.x); in.push_back(p.y);
     filter->update(in, out);
-    if (out.size() < 2) { ROS_ERROR("Update out vector size is too small!"); return; }
+//     if (out.size() != state_dimensions) { ROS_ERROR("Leg.h: Update out vector size is too small!"); return; }
     pos.x = out[0];
     pos.y = out[1];
-    predictions = 0;
+    state = out;
     if (observations < min_observations) { observations++; }
+    occluded_age = 0;
   }
 
-  int getPredictions()
+  double getMeasToTrackMatchingCov()
   {
-    return predictions;
+    double result = 0.;
+    Eigen::MatrixXd cov;
+    if (!filter->getCovarianceMatrix(cov)) { ROS_ERROR("Leg.h: getCovarianceMatrix() has failed!"); return result; }
+    result = cov(0, 0);
+    result += variance_observation;
+    return result;
   }
 
   Point getPos()
@@ -89,7 +114,7 @@ public:
     return pos;
   }
 
-  int getPeopleId()
+  unsigned int getPeopleId()
   {
 	  return peopleId;
   }
@@ -99,18 +124,9 @@ public:
 	  return observations;
   }
 
-  void setPeopleId(int id)
+  void setPeopleId(unsigned int id)
   {
 	  peopleId = id;
-  }
-
-  bool likelihood(const double& x, const double& y, double& out)
-  {
-    std::vector<double> in;
-    in.push_back(x); in.push_back(y);
-
-    if (!filter->likelihood(in, out)) { return false; }
-    return true;
   }
 
 };
