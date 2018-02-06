@@ -572,7 +572,7 @@ public:
 //       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair());
 
 //       ma_leg.markers.push_back(getMarker(l.getPos().x, l.getPos().y, getNextLegsMarkerId()));
-      if (l.getObservations() == 0) { continue; }
+      if (l.getObservations() == 0 || calculateNorm(l.getVel()) < 0.1) { continue; }
       ma_leg.markers.push_back(getArrowMarker(l.getPos().x, l.getPos().y,
 	       l.getPos().x + 0.5 * l.getVel().x, l.getPos().y + 0.5 * l.getVel().y, getNextLegsMarkerId()));
     }
