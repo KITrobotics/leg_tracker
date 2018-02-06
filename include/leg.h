@@ -32,22 +32,24 @@ private:
   Point vel, acc;
   //std::vector<double> state;
   int observations;
-  bool hasPair;
+  bool hasPair_;
   // int min_predictions;
-  // int min_observations;
-  // int state_dimensions;
+  int min_observations;
   std::list<std::vector<double> > history;
 //   bool isRemoved;
   int occluded_age;
+  int occluded_dead_age;
+  double variance_observation;
+  int state_dimensions;
 
 public:
-  Leg() {} = delete;
+  Leg() = delete;
 
   Leg(unsigned int legId, const Point& pos, int occluded_dead_age = 10,
     double variance_observation = 0.25, int min_observations = 4,
     int state_dimensions = 6)
   {
-    this->legId = id;
+    this->legId = legId;
     occluded_age = 0;
     this->pos = pos;
     this->occluded_dead_age = occluded_dead_age;
@@ -56,12 +58,12 @@ public:
     this->state_dimensions = state_dimensions;
 
     peopleId = -1;
-    hasPair = false;
+    hasPair_ = false;
     observations = 0;
 
     std::vector<double> in;
     // position
-    in.push_back(p.x); in.push_back(p.y);
+    in.push_back(pos.x); in.push_back(pos.y);
     // velocity
     in.push_back(0.0); in.push_back(0.0);
     // acceleration
@@ -97,6 +99,7 @@ public:
   void missed()
   {
     occluded_age++;
+    observations = 0;
   }
 
   double getMeasToTrackMatchingCov()
@@ -131,7 +134,7 @@ public:
     updateHistory(prediction);
   }
 
-  void updateForGNN(const Point& p)
+  void update(const Point& p)
   {
     std::vector<double> in, out;
     in.push_back(p.x); in.push_back(p.y);
@@ -146,6 +149,7 @@ public:
     if (observations < min_observations) { observations++; }
     history.pop_back(); // remove last prediction becaufe there is an update
     updateHistory(out);
+    occluded_age = 0;
   }
 
   void updateHistory(std::vector<double> new_state)
@@ -188,12 +192,12 @@ public:
 
   void setHasPair(bool value)
   {
-	  hasPair = value;
+	  hasPair_ = value;
   }
 
   bool hasPair()
   {
-	  return hasPair;
+	  return hasPair_;
   }
 
    bool getGatingMatrix(Eigen::MatrixXd& data_out)
