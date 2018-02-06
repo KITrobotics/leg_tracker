@@ -369,7 +369,7 @@ public:
 
   bool laserScanToPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, sensor_msgs::PointCloud2& cloud)
   {
-    if (!scan) { ROS_INFO("Laser scan pointer was not set!"); return false; }
+    if (!scan) { ROS_DEBUG("Laser scan pointer was not set!"); return false; }
     projector_.projectLaser(*scan, cloud);
     return true;
   }
@@ -394,7 +394,7 @@ public:
   {
     if (in.points.size() < 5)
     {
-      ROS_INFO("Filtering: Too small number of points in the input PointCloud!");
+      ROS_DEBUG("Filtering: Too small number of points in the input PointCloud!");
       return false;
     }
 
@@ -414,7 +414,7 @@ public:
     pass.filter ( pass_through_filtered_x );
     if ( pass_through_filtered_x.points.size() < 5)
     {
-      ROS_INFO("Filtering: Too small number of points in the PointCloud after PassThrough filter in x direction!");
+      ROS_DEBUG("Filtering: Too small number of points in the PointCloud after PassThrough filter in x direction!");
       return false;
     }
     pass.setInputCloud( pass_through_filtered_x.makeShared());
@@ -423,7 +423,7 @@ public:
     pass.filter (pass_through_filtered_y);
     if ( pass_through_filtered_y.points.size() < 5)
     {
-      ROS_INFO("Filtering: Too small number of points in the PointCloud after PassThrough filter in y direction!");
+      ROS_DEBUG("Filtering: Too small number of points in the PointCloud after PassThrough filter in y direction!");
       return false;
     }
 
@@ -440,7 +440,7 @@ public:
 
     if (out.points.size() < 5)
     {
-      ROS_INFO("Filtering: Too small number of points in the resulting PointCloud!");
+      ROS_DEBUG("Filtering: Too small number of points in the resulting PointCloud!");
       return false;
     }
     return true;
@@ -565,8 +565,8 @@ public:
     visualization_msgs::MarkerArray ma_leg;
     for (Leg& l : legs)
     {
-      ROS_INFO("VISlegs peopleId: %d, pos: (%f, %f), observations: %d, hasPair: %d",
-      l.getPeopleId(), l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair());
+//       ROS_INFO("VISlegs peopleId: %d, pos: (%f, %f), observations: %d, hasPair: %d",
+//       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair());
 
 //       ma_leg.markers.push_back(getMarker(l.getPos().x, l.getPos().y, getNextLegsMarkerId()));
       if (l.getObservations() == 0) { continue; }
@@ -871,7 +871,7 @@ public:
 	if (legs[i].getPeopleId() == legs[j].getPeopleId()) {
 	  if (distanceBtwTwoPoints(legs[i].getPos(), legs[j].getPos()) > max_dist_btw_legs)
 	  {
-	    ROS_INFO("separate leg %d and %d", i, j);
+// 	    ROS_INFO("separate leg %d and %d", i, j);
 	    separateLegs(i, j);
 	  }
 	  break;
@@ -917,7 +917,7 @@ public:
       indices_of_potential_legs.push_back(i);
     }
 
-    if (indices_of_potential_legs.size() == 0) { ROS_INFO("There is no potential second leg!"); return; }
+    if (indices_of_potential_legs.size() == 0) { ROS_DEBUG("There is no potential second leg!"); return; }
 
     if (indices_of_potential_legs.size() == 1) { 
       setPeopleId(fst_leg, indices_of_potential_legs[0], new_people, new_people_idx); 
@@ -937,7 +937,7 @@ public:
       int history_size = legs[fst_leg].getHistory().size();
       if (legs[indices_of_potential_legs[i]].getHistory().size() != history_size)
       {
-        ROS_ERROR("History check: queues are not equal in size!");
+        ROS_DEBUG("History check: queues are not equal in size!");
         return;
       }
       for (int j = 0; j < history_size; j++)
@@ -945,7 +945,7 @@ public:
       	if (distanceBtwTwoPoints(fst_history_it->at(0), fst_history_it->at(1),
       	  snd_history_it->at(0), snd_history_it->at(1)) > max_dist_btw_legs)
       	{
-      	  ROS_INFO("History check: distance is not valid!");
+      	  ROS_DEBUG("History check: distance is not valid!");
       	  isHistoryDistanceValid = false;
       	  break;
       	}
@@ -963,7 +963,6 @@ public:
 
       // if (isHistoryDistanceValid) { snd_leg = i; break; }
       // if (!isHistoryDistanceValid) { continue; }
-      ROS_WARN("max gain: %f, gain: %f", max_gain, gain);
       if (max_gain < gain) {
         max_gain = gain;
         snd_leg = i;
@@ -1351,7 +1350,7 @@ public:
   bool clustering(const PointCloud& cloud, PointCloud& cluster_centroids)
   {
 
-    if (cloud.points.size() < minClusterSize) { ROS_INFO("Clustering: Too small number of points!"); return false; }
+    if (cloud.points.size() < minClusterSize) { ROS_DEBUG("Clustering: Too small number of points!"); return false; }
 //     pcl::PCDWriter writer;
 
     pcl::search::KdTree<Point>::Ptr tree (new pcl::search::KdTree<Point>);
@@ -2224,15 +2223,15 @@ public:
     if (!clustering(filteredCloudXYZ, cluster_centroids)) { predictLegs(); return; }
 
 
-    ROS_WARN("vor: ");
-    printLegsInfo();
+//     ROS_WARN("vor: ");
+//     printLegsInfo();
     if (isOnePersonToTrack) {
       matchLegCandidates(cluster_centroids);
     } else {
       gnn_munkres(cluster_centroids);
     }
-    ROS_WARN("nach: ");
-    printLegsInfo();
+//     ROS_WARN("nach: ");
+//     printLegsInfo();
     visLegs();
 //     checkPeopleId();
     PointCloud new_people;
