@@ -934,10 +934,6 @@ public:
     for (int i = 0; i < indices_of_potential_legs.size(); i++)
     {
       double gain = 0.;
-      if (indices_of_potential_legs[i].getDistTravelled() < min_dist_travelled) {
-        ROS_DEBUG("Distance travelled: not enough!");
-        continue;
-      }
       bool isHistoryDistanceValid = true;
       std::list<std::vector<double> >::iterator fst_history_it = legs[fst_leg].getHistory().begin(),
         snd_history_it = legs[indices_of_potential_legs[i]].getHistory().begin();
@@ -1268,6 +1264,10 @@ public:
     {
       int id = legs[i].getPeopleId();
       if (id == -1) { continue; }
+      // if (legs[i].getDistTravelled() < min_dist_travelled) {
+      //   ROS_DEBUG("Distance travelled: not enough!");
+      //   continue;
+      // }
 
 	  // second leg is removed
 	if (!legs[i].hasPair())
