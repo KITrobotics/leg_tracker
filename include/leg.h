@@ -11,11 +11,12 @@ typedef pcl::PointXYZ Point;
 typedef iirob_filters::MultiChannelKalmanFilter<double> KalmanFilter;
 
 
-int occluded_dead_age = 10;
-double variance_observation = 0.25;
+// int occluded_dead_age = 10;
+// double variance_observation = 0.25;
+//
+// int min_observations = 4;
+// int state_dimensions = 6;
 
-int min_observations = 4;
-int state_dimensions = 6;
 
 class Leg
 {
@@ -41,6 +42,7 @@ private:
   int occluded_dead_age;
   double variance_observation;
   int state_dimensions;
+  double distance_traveled;
 
 public:
   Leg() = delete;
@@ -60,6 +62,7 @@ public:
     peopleId = -1;
     hasPair_ = false;
     observations = 0;
+    distance_traveled = 0.;
 
     std::vector<double> in;
     // position
@@ -140,6 +143,11 @@ public:
     in.push_back(p.x); in.push_back(p.y);
     filter->update(in, out);
     if (out.size() != state_dimensions) { ROS_ERROR("Leg.h: Update out vector size is too small!"); return; }
+    if (observations > 0 && hasPair_ && dist_travelled < min_dist_travelled)
+    {
+      double delta_dist_travelled = std::sqrt(std::pow((pos.x - out[0]), 2) + std::pow((pos.y - out[1]), 2));
+      if (delta_dist_travelled > 0.01) { distance_traveled += delta_dist_travelled; }
+    }
     pos.x = out[0];
     pos.y = out[1];
     vel.x = out[2];
@@ -185,9 +193,16 @@ public:
 	  return observations;
   }
 
+  double getDistTravelled() {
+    return dist_travelled;
+  }
+
   void setPeopleId(int id)
   {
 	  peopleId = id;
+    if (id == -1) {
+      dist_travelled = 0.;
+    }
   }
 
   void setHasPair(bool value)

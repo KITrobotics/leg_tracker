@@ -19,4 +19,5 @@ isOnePersonToTrack: true
 max_nn_gating_distance: 1.0
 occluded_dead_age: 10
 variance_observation: 0.25
+min_dist_travelled: 0.25
 #history_size: 5

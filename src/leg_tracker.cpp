@@ -126,6 +126,8 @@ private:
 
   double max_nn_gating_distance;
 
+  double min_dist_travelled;
+
   //mht
 //   std::list<Leg> legs;
   std::vector<Leg> legs;
@@ -181,8 +183,9 @@ public:
     nh_.param("clusterTolerance", clusterTolerance, 0.07);
     nh_.param("isOnePersonToTrack", isOnePersonToTrack, false);
     nh_.param("max_nn_gating_distance", max_nn_gating_distance, 1.0);
-    nh_.param("occluded_dead_age", occluded_dead_age, 10);
+    nh_.param("occluded_dead_age", occluded_dead_age, 10);min_dist_travelled
     nh_.param("variance_observation", variance_observation, 0.25);
+    nh_.param("min_dist_travelled", min_dist_travelled, 0.25);
 
 
     legs_gathered = id_counter = legs_marker_next_id = next_leg_id = people_marker_next_id = 0;
@@ -569,7 +572,7 @@ public:
 //       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair());
 
 //       ma_leg.markers.push_back(getMarker(l.getPos().x, l.getPos().y, getNextLegsMarkerId()));
-      if (l.getObservations() == 0) { continue; }
+      if (l.getObservations() == 0 || calculateNorm(l.getVel()) < 0.1) { continue; }
       ma_leg.markers.push_back(getArrowMarker(l.getPos().x, l.getPos().y,
 	       l.getPos().x + 0.5 * l.getVel().x, l.getPos().y + 0.5 * l.getVel().y, getNextLegsMarkerId()));
     }
@@ -585,8 +588,8 @@ public:
     bool isLeft = legs[0].getPos().x < legs[1].getPos().x;
     pub_leg_posvelacc(*fst_history_it, isLeft);	pub_leg_posvelacc(*snd_history_it, !isLeft); 
   }
-  
-  int getNextLegsMarkerId() 
+
+  int getNextLegsMarkerId()
   {
     return legs_marker_next_id++;
   }
@@ -744,7 +747,7 @@ public:
     {
       legs.push_back(initLeg(p));
     }
-    
+
   }
 
       /*
@@ -836,9 +839,9 @@ public:
   bool findAndEraseMatchWithCov(int legIndex, PointCloud& cloud, Point& out)
   {
     if (cloud.points.size() == 0) { ROS_INFO("findAndEraseMatchWithCov: Cloud is emty!"); return false; }
-  
-  
-    
+
+
+
     int index = -1;
     double min_dist = max_cost;
     for (int i = 0; i < cloud.points.size(); i++)
@@ -852,13 +855,13 @@ public:
 	min_dist = mahalanobis_dist;
       }
     }
-  
+
     if (index == -1) { ROS_INFO("findAndEraseMatchWithCov: index = -1!"); return false; }
-  
-  
+
+
     out = cloud.points[index];
     cloud.points.erase(cloud.points.begin() + index);
-  
+
     return true;
   }
 
@@ -888,7 +891,7 @@ public:
       }
     }
   }
-  
+
   Person initPerson(const Point& pos, int id)
   {
     Person p(id, pos, occluded_dead_age,
@@ -928,10 +931,10 @@ public:
 
     if (indices_of_potential_legs.size() == 0) { ROS_DEBUG("There is no potential second leg!"); return; }
 
-    if (indices_of_potential_legs.size() == 1) { 
-      setPeopleId(fst_leg, indices_of_potential_legs[0], new_people, new_people_idx); 
-      return; 
-    }
+    // if (indices_of_potential_legs.size() == 1) {
+    //   setPeopleId(fst_leg, indices_of_potential_legs[0], new_people, new_people_idx);
+    //   return;
+    // }
 
     int snd_leg = -1;
   	//snd_leg = findMatch(legs[fst_leg].getPos(), potential_legs, indices);
@@ -971,7 +974,7 @@ public:
       gain /= history_size;
 
       // if (isHistoryDistanceValid) { snd_leg = i; break; }
-      // if (!isHistoryDistanceValid) { continue; }
+      if (!isHistoryDistanceValid || ) { continue; }
       if (max_gain < gain) {
         max_gain = gain;
         snd_leg = i;
@@ -1080,14 +1083,14 @@ public:
 	  legs[snd_leg].setPeopleId(id);
 	  legs[fst_leg].setHasPair(true);
 	  legs[snd_leg].setHasPair(true);
-	  
+
 // 	  Point person;
 // 	  person.x = (legs[fst_leg].getPos().x + legs[snd_leg].getPos().x) / 2;
 // 	  person.y = (legs[fst_leg].getPos().y + legs[snd_leg].getPos().y) / 2;
-	  
+
 // 	  new_people.points.push_back(person);
 // 	  new_people_idx.push_back(id);
-	 
+
 	  //std::pair<PeopleMap::iterator, bool> ret;
 	  //std::pair <Point, Point> leg_points = std::make_pair(legs[fst_leg].getPos(), legs[fst_leg].getPos());
 	  //ret = persons.insert ( std::pair<int, std::pair <Point, Point> >(id, leg_points) );
@@ -1237,22 +1240,22 @@ public:
 //     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
     return marker;
   }
-  
+
   void vis_persons()
   {
     if (people_marker_next_id != 0) {
       removeOldMarkers(people_marker_next_id, people_pub);
       people_marker_next_id = 0;
     }
-    
+
     visualization_msgs::MarkerArray ma_people;
-    
+
     for (int i = 0; i < persons.size(); i++) {
 	    ma_people.markers.push_back(getMarker(persons[i].getPos().x,
 		persons[i].getPos().y, z_coordinate * 3, getPeopleMarkerNextId()));
     }
-    
-    
+
+
     people_pub.publish(ma_people);
   }
 
@@ -1270,6 +1273,10 @@ public:
     {
       int id = legs[i].getPeopleId();
       if (id == -1) { continue; }
+      // if (legs[i].getDistTravelled() < min_dist_travelled) {
+      //   ROS_DEBUG("Distance travelled: not enough!");
+      //   continue;
+      // }
 
 	  // second leg is removed
 	if (!legs[i].hasPair())
@@ -1285,7 +1292,7 @@ public:
 // 			  ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2removed: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
 // 			  id, legs[i].getPos().x, legs[i].getPos().y, l.getPos().x, l.getPos().y, legs[i].getPredictions(), l.getPredictions(),
 // 				   legs[i].getObservations(), l.getObservations(), legs[i].hasPair(), l.hasPair());
-			
+
 			  break;
 			}
 		}
@@ -1754,7 +1761,7 @@ public:
       }
       v.pop_back();
    }
-   
+
    void resetHasPair(std::vector<Leg>& v, int fst_leg)
    {
       for (int snd_leg = 0; snd_leg < v.size(); snd_leg++) {
@@ -1778,7 +1785,7 @@ public:
         }
      }
    }
-   
+
    void cullDeadTracksOfPersons(std::vector<Person>& v)
    {
      int i = 0;
@@ -1790,8 +1797,8 @@ public:
         }
      }
    }
-   
-   
+
+
    void gnn_munkres_people(const PointCloud& new_people, std::vector<int>& new_people_idx)
    {
       // Filter model predictions
@@ -1807,7 +1814,7 @@ public:
 
       persons = fused;
    }
-   
+
    void assign_munkres_people(const PointCloud& new_people,
                          std::vector<Person> &tracks,
                          std::vector<Person> &fused, std::vector<int>& new_people_idx)
@@ -2193,12 +2200,12 @@ public:
     vis_pub.publish( marker );
 
   }
-  
-//   void checkPeopleId() 
+
+//   void checkPeopleId()
 //   {
 //     for (Leg& l : legs) {
 //       if (!l.hasPair()) { continue; }
-//       
+//
 //     }
 //   }
 
@@ -2246,13 +2253,13 @@ public:
     PointCloud new_people;
     std::vector<int> new_people_idx;
     findPeople(new_people, new_people_idx);
-    
+
 //     gnn_munkres_people(new_people, new_people_idx);
-    
+
     vis_people();
 //     vis_persons();
-    
-    
+
+
 //     GNN(cluster_centroids);
 //     pcl_cloud_publisher.publish(filteredCloudXYZ.makeShared());
 
