@@ -101,8 +101,8 @@ private:
   double leg_radius;
   std::vector<double> centerOfLegLastMeasurement;
   Point person_center;
-  cv::Point2f left_leg_prediction;
-  cv::Point2f right_leg_prediction;
+//   cv::Point2f left_leg_prediction;
+//   cv::Point2f right_leg_prediction;
   int legs_gathered;
   int min_observations;
   // int min_predictions;
@@ -574,6 +574,16 @@ public:
 	       l.getPos().x + 0.5 * l.getVel().x, l.getPos().y + 0.5 * l.getVel().y, getNextLegsMarkerId()));
     }
     legs_and_vel_direction_publisher.publish(ma_leg);
+    
+    if (legs.size() != 2) {
+      return;
+    }
+    if (legs[0].getHistory().size() < 1 && legs[1].getHistory().size() < 1) { return; }
+    std::list<std::vector<double> >::iterator fst_history_it = legs[0].getHistory().end(),
+      snd_history_it = legs[1].getHistory().end(),
+    fst_history_it--; snd_history_it--;
+    bool isLeft = legs[0].getPos().x < legs[1].getPos().x;
+    pub_leg_posvelacc(*fst_history_it, isLeft);	pub_leg_posvelacc(*snd_history_it, !isLeft); 
   }
   
   int getNextLegsMarkerId() 
@@ -825,7 +835,6 @@ public:
 
   bool findAndEraseMatchWithCov(int legIndex, PointCloud& cloud, Point& out)
   {
-    ROS_INFO("findAndEraseMatchWithCov");
     if (cloud.points.size() == 0) { ROS_INFO("findAndEraseMatchWithCov: Cloud is emty!"); return false; }
   
   
@@ -1402,7 +1411,7 @@ public:
     return true;
   }
 
-  void sortPointCloudToLeftAndRight(const PointCloud& input_cloud, PointCloud::Ptr left, PointCloud::Ptr right)
+  /*void sortPointCloudToLeftAndRight(const PointCloud& input_cloud, PointCloud::Ptr left, PointCloud::Ptr right)
   {
 
 //     #if CV_MAJOR_VERSION == 2
@@ -1479,7 +1488,7 @@ public:
 //     #elif CV_MAJOR_VERSION == 3
     // do opencv 3 code
 //     #endif
-  }
+  }*/
 
 //   std::vector<double> computeCentroids(PointCloud::Ptr cloud)
 //   {
@@ -1567,68 +1576,68 @@ public:
     else { pos_vel_acc_rleg_pub.publish(msg); }
   }
 
-  bool useKalmanFilterAndPubCircles(const PointCloud::Ptr cloud, bool isLeft)
-  {
-    const int num_elements_measurement = 2;
-    const int num_elements_kalman = 6;
-    std::vector<double> centerOfLegMeasurement;
-    std::vector<double> centerOfLegKalman;
-//     if (circle_fitting == "ransac")
+//   bool useKalmanFilterAndPubCircles(const PointCloud::Ptr cloud, bool isLeft)
+//   {
+//     const int num_elements_measurement = 2;
+//     const int num_elements_kalman = 6;
+//     std::vector<double> centerOfLegMeasurement;
+//     std::vector<double> centerOfLegKalman;
+// //     if (circle_fitting == "ransac")
+// //     {
+// //       centerOfLegMeasurement = computeRansacPubInliersAndGetCenters(cloud);
+// //     }
+// //     else
+// //     {
+// //       centerOfLegMeasurement = computeCentroids(cloud);
+// //     }
+//     if (!computeCircularity(cloud, centerOfLegMeasurement)) { return false; }
+// 
+//     if (centerOfLegMeasurement.size() < num_elements_measurement)
 //     {
-//       centerOfLegMeasurement = computeRansacPubInliersAndGetCenters(cloud);
+//       ROS_ERROR("Center (measurement) does not have enough elements!");
+//       return false;
 //     }
-//     else
+// 
+// //     if (abs(centerOfLegMeasurement[0] - centerOfLegLastMeasurement[0]) > ...)
+// //     {
+// //
+// //     }
+//     std::vector<double> prediction;
+//     if (isLeft) { left_leg_filter->predict(prediction); left_leg_prediction = cv::Point2f(prediction[0], prediction[1]); }
+//     else { right_leg_filter->predict(prediction); right_leg_prediction = cv::Point2f(prediction[0], prediction[1]); }
+//     pub_circle(prediction[0], prediction[1], leg_radius, isLeft, isLeft ? 2 : 3);
+// 
+//     if (isLeft) { left_leg_filter->update(centerOfLegMeasurement, centerOfLegKalman); }
+//     else { right_leg_filter->update(centerOfLegMeasurement, centerOfLegKalman); }
+// 
+// //     pub_circle(centerOfLegMeasurement[0], centerOfLegMeasurement[1], leg_radius, isLeft, isLeft ? 0 : 1);
+// 
+// 
+// 
+//     if (centerOfLegKalman.size() < num_elements_kalman)
 //     {
-//       centerOfLegMeasurement = computeCentroids(cloud);
+//       ROS_ERROR("Centers (kalman) do not have enough elements!");
+//       return false;
 //     }
-    if (!computeCircularity(cloud, centerOfLegMeasurement)) { return false; }
-
-    if (centerOfLegMeasurement.size() < num_elements_measurement)
-    {
-      ROS_ERROR("Center (measurement) does not have enough elements!");
-      return false;
-    }
-
-//     if (abs(centerOfLegMeasurement[0] - centerOfLegLastMeasurement[0]) > ...)
-//     {
-//
+// 
+// //     pub_circle(centerOfLegKalman[0], centerOfLegKalman[1], leg_radius, isLeft, isLeft ? 2 : 3);
+//     if (legs_gathered == 1) {
+//       person_center.x = (person_center.x + centerOfLegKalman[0]) / 2;
+//       person_center.y = (person_center.y + centerOfLegKalman[1]) / 2;
+//       legs_gathered++;
+//     } else {
+//       if (legs_gathered == 2) {
+// 	pub_circle(person_center.x, person_center.y, 0.7, isLeft, 0);
+//       }
+//       person_center.x = centerOfLegKalman[0];
+//       person_center.y = centerOfLegKalman[1];
+//       legs_gathered = 1;
 //     }
-    std::vector<double> prediction;
-    if (isLeft) { left_leg_filter->predict(prediction); left_leg_prediction = cv::Point2f(prediction[0], prediction[1]); }
-    else { right_leg_filter->predict(prediction); right_leg_prediction = cv::Point2f(prediction[0], prediction[1]); }
-    pub_circle(prediction[0], prediction[1], leg_radius, isLeft, isLeft ? 2 : 3);
-
-    if (isLeft) { left_leg_filter->update(centerOfLegMeasurement, centerOfLegKalman); }
-    else { right_leg_filter->update(centerOfLegMeasurement, centerOfLegKalman); }
-
-//     pub_circle(centerOfLegMeasurement[0], centerOfLegMeasurement[1], leg_radius, isLeft, isLeft ? 0 : 1);
-
-
-
-    if (centerOfLegKalman.size() < num_elements_kalman)
-    {
-      ROS_ERROR("Centers (kalman) do not have enough elements!");
-      return false;
-    }
-
-//     pub_circle(centerOfLegKalman[0], centerOfLegKalman[1], leg_radius, isLeft, isLeft ? 2 : 3);
-    if (legs_gathered == 1) {
-      person_center.x = (person_center.x + centerOfLegKalman[0]) / 2;
-      person_center.y = (person_center.y + centerOfLegKalman[1]) / 2;
-      legs_gathered++;
-    } else {
-      if (legs_gathered == 2) {
-	pub_circle(person_center.x, person_center.y, 0.7, isLeft, 0);
-      }
-      person_center.x = centerOfLegKalman[0];
-      person_center.y = centerOfLegKalman[1];
-      legs_gathered = 1;
-    }
-
-    pub_leg_posvelacc(centerOfLegKalman, isLeft);
-
-    return true;
-  }
+// 
+//     pub_leg_posvelacc(centerOfLegKalman, isLeft);
+// 
+//     return true;
+//   }
 
   bool computeCircularity(const PointCloud::Ptr cloud, std::vector<double>& center)
   {
@@ -2223,15 +2232,15 @@ public:
     if (!clustering(filteredCloudXYZ, cluster_centroids)) { predictLegs(); return; }
 
 
-//     ROS_WARN("vor: ");
-//     printLegsInfo();
+    ROS_WARN("vor: ");
+    printLegsInfo();
     if (isOnePersonToTrack) {
       matchLegCandidates(cluster_centroids);
     } else {
       gnn_munkres(cluster_centroids);
     }
-//     ROS_WARN("nach: ");
-//     printLegsInfo();
+    ROS_WARN("nach: ");
+    printLegsInfo();
     visLegs();
 //     checkPeopleId();
     PointCloud new_people;
