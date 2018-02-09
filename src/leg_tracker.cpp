@@ -183,7 +183,7 @@ public:
     nh_.param("clusterTolerance", clusterTolerance, 0.07);
     nh_.param("isOnePersonToTrack", isOnePersonToTrack, false);
     nh_.param("max_nn_gating_distance", max_nn_gating_distance, 1.0);
-    nh_.param("occluded_dead_age", occluded_dead_age, 10);min_dist_travelled
+    nh_.param("occluded_dead_age", occluded_dead_age, 10);
     nh_.param("variance_observation", variance_observation, 0.25);
     nh_.param("min_dist_travelled", min_dist_travelled, 0.25);
 
@@ -581,12 +581,10 @@ public:
     if (legs.size() != 2) {
       return;
     }
-    if (legs[0].getHistory().size() < 1 && legs[1].getHistory().size() < 1) { return; }
-    std::list<std::vector<double> >::iterator fst_history_it = legs[0].getHistory().end(),
-      snd_history_it = legs[1].getHistory().end(),
-    fst_history_it--; snd_history_it--;
-    bool isLeft = legs[0].getPos().x < legs[1].getPos().x;
-    pub_leg_posvelacc(*fst_history_it, isLeft);	pub_leg_posvelacc(*snd_history_it, !isLeft); 
+//     if (legs[0].getHistory().size() < 1 && legs[1].getHistory().size() < 1) { return; }
+//     bool isLeft = legs[0].getPos().x < legs[1].getPos().x;
+//     pub_leg_posvelacc(legs[0].getHistory().back(), isLeft);
+//     pub_leg_posvelacc(legs[1].getHistory().back(), !isLeft); 
   }
 
   int getNextLegsMarkerId()
@@ -935,25 +933,30 @@ public:
     //   setPeopleId(fst_leg, indices_of_potential_legs[0], new_people, new_people_idx);
     //   return;
     // }
-
+    ROS_WARN("1");
     int snd_leg = -1;
   	//snd_leg = findMatch(legs[fst_leg].getPos(), potential_legs, indices);
 
     double max_gain = 0.;
     for (int i = 0; i < indices_of_potential_legs.size(); i++)
     {
+      ROS_WARN("1");
       double gain = 0.;
       bool isHistoryDistanceValid = true;
       std::list<std::vector<double> >::iterator fst_history_it = legs[fst_leg].getHistory().begin(),
         snd_history_it = legs[indices_of_potential_legs[i]].getHistory().begin();
+      ROS_WARN("2");
       int history_size = legs[fst_leg].getHistory().size();
       if (legs[indices_of_potential_legs[i]].getHistory().size() != history_size)
       {
+      ROS_WARN("3");
         ROS_DEBUG("History check: queues are not equal in size!");
         return;
       }
+      ROS_WARN("4");
       for (int j = 0; j < history_size; j++)
       {
+      ROS_WARN("5");
       	if (distanceBtwTwoPoints(fst_history_it->at(0), fst_history_it->at(1),
       	  snd_history_it->at(0), snd_history_it->at(1)) > max_dist_btw_legs)
       	{
@@ -962,23 +965,25 @@ public:
       	  break;
       	}
 
-        double dist = distanceBtwTwoPoints(fst_history_it->at(0), fst_history_it->at(1),
-      	  snd_history_it->at(0), snd_history_it->at(1));
-        double forgettingFactor = std::pow(0.5, history_size - 1 - j);
-        gain += forgettingFactor * (1 - dist / sqrt(200));
+//         double dist = distanceBtwTwoPoints(fst_history_it->at(0), fst_history_it->at(1),
+//       	  snd_history_it->at(0), snd_history_it->at(1));
+//         double forgettingFactor = std::pow(0.5, history_size - 1 - j);
+//         gain += forgettingFactor * (1 - dist / std::sqrt(200));
 
       	fst_history_it++; snd_history_it++;
 
       }
+      ROS_WARN("6");
 
       gain /= history_size;
 
       // if (isHistoryDistanceValid) { snd_leg = i; break; }
-      if (!isHistoryDistanceValid || ) { continue; }
+      if (!isHistoryDistanceValid) { continue; }
       if (max_gain < gain) {
         max_gain = gain;
         snd_leg = i;
       }
+      ROS_WARN("7");
     }
 
     if (snd_leg == -1) { ROS_INFO("Could not find second leg!"); return; }
@@ -2256,7 +2261,7 @@ public:
 
 //     gnn_munkres_people(new_people, new_people_idx);
 
-    vis_people();
+   vis_people();
 //     vis_persons();
 
 
