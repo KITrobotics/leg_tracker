@@ -143,11 +143,11 @@ public:
     in.push_back(p.x); in.push_back(p.y);
     filter->update(in, out);
     if (out.size() != state_dimensions) { ROS_ERROR("Leg.h: Update out vector size is too small!"); return; }
-    if (observations > 0 && hasPair_ && dist_travelled < min_dist_travelled)
-    {
-      double delta_dist_travelled = std::sqrt(std::pow((pos.x - out[0]), 2) + std::pow((pos.y - out[1]), 2));
-      if (delta_dist_travelled > 0.01) { distance_traveled += delta_dist_travelled; }
-    }
+//     if (observations > 0 && hasPair_ && dist_travelled < min_dist_travelled)
+//     {
+//       double delta_dist_travelled = std::sqrt(std::pow((pos.x - out[0]), 2) + std::pow((pos.y - out[1]), 2));
+//       if (delta_dist_travelled > 0.01) { distance_traveled += delta_dist_travelled; }
+//     }
     pos.x = out[0];
     pos.y = out[1];
     vel.x = out[2];
@@ -193,16 +193,16 @@ public:
 	  return observations;
   }
 
-  double getDistTravelled() {
-    return dist_travelled;
-  }
+//   double getDistTravelled() {
+//     return dist_travelled;
+//   }
 
   void setPeopleId(int id)
   {
 	  peopleId = id;
-    if (id == -1) {
-      dist_travelled = 0.;
-    }
+//     if (id == -1) {
+//       dist_travelled = 0.;
+//     }
   }
 
   void setHasPair(bool value)
