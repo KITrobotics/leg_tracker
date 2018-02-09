@@ -36,7 +36,7 @@ private:
   bool hasPair_;
   // int min_predictions;
   int min_observations;
-  std::list<std::vector<double> > history;
+  std::vector<std::vector<double> > history;
 //   bool isRemoved;
   int occluded_age;
   int occluded_dead_age;
@@ -58,6 +58,9 @@ public:
     this->variance_observation = variance_observation;
     this->min_observations = min_observations;
     this->state_dimensions = state_dimensions;
+    
+    history.resize(min_observations);
+    for (int i = 0; i < min_observations; i++) { history[i].resize(state_dimensions); }
 
     peopleId = -1;
     hasPair_ = false;
@@ -134,7 +137,6 @@ public:
     vel.y = prediction[3];
     acc.x = prediction[4];
     acc.y = prediction[5];
-    updateHistory(prediction);
   }
 
   void update(const Point& p)
@@ -154,21 +156,20 @@ public:
     vel.y = out[3];
     acc.x = out[4];
     acc.y = out[5];
-    if (observations < min_observations) { observations++; }
-    history.pop_back(); // remove last prediction becaufe there is an update
     updateHistory(out);
     occluded_age = 0;
+    if (observations < min_observations) { observations++; }
+//     history.pop_back(); // remove last prediction becaufe there is an update
   }
 
-  void updateHistory(std::vector<double> new_state)
+  void updateHistory(const std::vector<double>& new_state)
   {
-    if (history.size() >= min_observations) {
-      history.pop_front();
-    }
-    history.push_back(new_state);
+    if (observations >= history.size() || observations < 0 
+	|| new_state.size() != state_dimensions) { return; }
+    for (int i = 0; i < state_dimensions; i++) { history[observations][i] = new_state[i]; }
   }
 
-  std::list<std::vector<double> > getHistory()
+  std::vector<std::vector<double> > getHistory() const
   {
     return history;
   }

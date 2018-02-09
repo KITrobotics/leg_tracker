@@ -572,7 +572,7 @@ public:
 //       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair());
 
 //       ma_leg.markers.push_back(getMarker(l.getPos().x, l.getPos().y, getNextLegsMarkerId()));
-      if (l.getObservations() == 0 || calculateNorm(l.getVel()) < 0.1) { continue; }
+      if (l.getObservations() == 0 || calculateNorm(l.getVel()) < 0.01) { continue; }
       ma_leg.markers.push_back(getArrowMarker(l.getPos().x, l.getPos().y,
 	       l.getPos().x + 0.5 * l.getVel().x, l.getPos().y + 0.5 * l.getVel().y, getNextLegsMarkerId()));
     }
@@ -933,47 +933,80 @@ public:
     //   setPeopleId(fst_leg, indices_of_potential_legs[0], new_people, new_people_idx);
     //   return;
     // }
-    ROS_WARN("1");
     int snd_leg = -1;
   	//snd_leg = findMatch(legs[fst_leg].getPos(), potential_legs, indices);
 
     double max_gain = 0.;
     for (int i = 0; i < indices_of_potential_legs.size(); i++)
     {
-      ROS_WARN("1");
       double gain = 0.;
       bool isHistoryDistanceValid = true;
-      std::list<std::vector<double> >::iterator fst_history_it = legs[fst_leg].getHistory().begin(),
+      std::vector<std::vector<double> >::iterator fst_history_it = legs[fst_leg].getHistory().begin(),
         snd_history_it = legs[indices_of_potential_legs[i]].getHistory().begin();
-      ROS_WARN("2");
       int history_size = legs[fst_leg].getHistory().size();
+      ROS_WARN("2 history_size: %d", history_size);
       if (legs[indices_of_potential_legs[i]].getHistory().size() != history_size)
       {
-      ROS_WARN("3");
         ROS_DEBUG("History check: queues are not equal in size!");
         return;
       }
-      ROS_WARN("4");
       for (int j = 0; j < history_size; j++)
       {
-      ROS_WARN("5");
-      	if (distanceBtwTwoPoints(fst_history_it->at(0), fst_history_it->at(1),
-      	  snd_history_it->at(0), snd_history_it->at(1)) > max_dist_btw_legs)
-      	{
-      	  ROS_DEBUG("History check: distance is not valid!");
-      	  isHistoryDistanceValid = false;
-      	  break;
-      	}
+	std::vector<double>& fst_history = *fst_history_it;
+	std::vector<double>& snd_history = *snd_history_it;
+	ROS_WARN("2 fst_history: %d, snd_history: %d", (int) fst_history.size(), (int) snd_history.size());
+	
+	std::string s = "";
+	for (int k = 0; k <= history_size; k++) {
+	  for (double d : fst_history) {
+	    s += std::to_string(d); s += " ";
+	  }
+	  s += "\n";
+	}
+	ROS_WARN("fst_history: \n%s", s.c_str());
+	s = "";
+	for (int k = 0; k <= history_size; k++) {
+	  for (double d : snd_history) {
+	    s += std::to_string(d); s += " ";
+	  }
+	  s += "\n";
+	}
+	ROS_WARN("snd_history: \n%s", s.c_str());
+      
+      
+	if (fst_history.size() != state_dimensions || snd_history.size() != state_dimensions) 
+	{
+	    ROS_DEBUG("History check: state_dimensions are not valid!");
+	    isHistoryDistanceValid = false;
+	    break;
+	}
+	
+	double dist = distanceBtwTwoPoints(fst_history[0], fst_history[1],
+	  snd_history[0], snd_history[1]);
+	
+	if (dist > max_dist_btw_legs)
+	{
+	  ROS_DEBUG("History check: distance is not valid!");
+	  isHistoryDistanceValid = false;
+	  break;
+	}
+      
+//       	if (distanceBtwTwoPoints(fst_history_it->at(0), fst_history_it->at(1),
+//       	  snd_history_it->at(0), snd_history_it->at(1)) > max_dist_btw_legs)
+//       	{
+//       	  ROS_DEBUG("History check: distance is not valid!");
+//       	  isHistoryDistanceValid = false;
+//       	  break;
+//       	}
 
 //         double dist = distanceBtwTwoPoints(fst_history_it->at(0), fst_history_it->at(1),
 //       	  snd_history_it->at(0), snd_history_it->at(1));
-//         double forgettingFactor = std::pow(0.5, history_size - 1 - j);
-//         gain += forgettingFactor * (1 - dist / std::sqrt(200));
+        double forgettingFactor = std::pow(0.5, history_size - 1 - j);
+        gain += forgettingFactor * (1 - dist / std::sqrt(200));
 
       	fst_history_it++; snd_history_it++;
 
       }
-      ROS_WARN("6");
 
       gain /= history_size;
 
@@ -983,7 +1016,6 @@ public:
         max_gain = gain;
         snd_leg = i;
       }
-      ROS_WARN("7");
     }
 
     if (snd_leg == -1) { ROS_INFO("Could not find second leg!"); return; }
