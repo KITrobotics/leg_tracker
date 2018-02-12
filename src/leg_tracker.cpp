@@ -902,7 +902,9 @@ public:
     checkDistanceOfLegs();
     for (int i = 0; i < legs.size(); i++)
     {
-      if (legs[i].hasPair()) { continue; }
+      if (legs[i].hasPair() || 
+	(legs[i].getPeopleId() == -1 && legs[i].getObservations() < min_observations)) 
+	{ continue; }
 //       if ((legs[i].getPeopleId() != -1 || legs[i].getObservations() >= min_observations) && !)
 //       {
       findSecondLeg(i, new_people, new_people_idx);
@@ -941,48 +943,61 @@ public:
     {
       double gain = 0.;
       bool isHistoryDistanceValid = true;
-      std::vector<std::vector<double> >::iterator fst_history_it = legs[fst_leg].getHistory().begin(),
-        snd_history_it = legs[indices_of_potential_legs[i]].getHistory().begin();
+//       std::vector<std::vector<double> >::iterator fst_history_it = legs[fst_leg].getHistory().begin(),
+//         snd_history_it = legs[indices_of_potential_legs[i]].getHistory().begin();
       int history_size = legs[fst_leg].getHistory().size();
-      ROS_WARN("2 history_size: %d", history_size);
-      if (legs[indices_of_potential_legs[i]].getHistory().size() != history_size)
+      if (history_size != min_observations || 
+	legs[indices_of_potential_legs[i]].getHistory().size() != history_size)
       {
-        ROS_DEBUG("History check: queues are not equal in size!");
+        ROS_WARN("History check: vectors are not equal in size!");
         return;
       }
-      for (int j = 0; j < history_size; j++)
+      for (int j = 0; j < history_size - 1; j++)
       {
-	std::vector<double>& fst_history = *fst_history_it;
-	std::vector<double>& snd_history = *snd_history_it;
-	ROS_WARN("2 fst_history: %d, snd_history: %d", (int) fst_history.size(), (int) snd_history.size());
+// 	std::vector<double>& fst_history = *fst_history_it;
+// 	std::vector<double>& snd_history = *snd_history_it;
 	
-	std::string s = "";
-	for (int k = 0; k <= history_size; k++) {
-	  for (double d : fst_history) {
-	    s += std::to_string(d); s += " ";
-	  }
-	  s += "\n";
-	}
-	ROS_WARN("fst_history: \n%s", s.c_str());
-	s = "";
-	for (int k = 0; k <= history_size; k++) {
-	  for (double d : snd_history) {
-	    s += std::to_string(d); s += " ";
-	  }
-	  s += "\n";
-	}
-	ROS_WARN("snd_history: \n%s", s.c_str());
-      
-      
-	if (fst_history.size() != state_dimensions || snd_history.size() != state_dimensions) 
+// 	std::vector<double>::iterator fst_history = legs[fst_leg].getHistory()[j].begin();
+// 	std::vector<double>::iterator snd_history = legs[indices_of_potential_legs[i]].getHistory()[j];
+	
+	int fst_history_size = legs[fst_leg].getHistory()[j].size();
+	int snd_history_size = legs[indices_of_potential_legs[i]].getHistory()[j].size();
+	
+// 	ROS_WARN("fst_history: %d, snd_history: %d", fst_history_fst_value, snd_history_size);
+	
+	if (fst_history_size != state_dimensions || snd_history_size != state_dimensions)
 	{
-	    ROS_DEBUG("History check: state_dimensions are not valid!");
-	    isHistoryDistanceValid = false;
-	    break;
+	  ROS_WARN("History check: stae vectors are not valid!");
+	  return;
 	}
 	
-	double dist = distanceBtwTwoPoints(fst_history[0], fst_history[1],
-	  snd_history[0], snd_history[1]);
+// 	std::string s = "";
+// 	for (int k = 0; k <= history_size; k++) {
+// 	  for (double d : fst_history) {
+// 	    s += std::to_string(d); s += " ";
+// 	  }
+// 	  s += "\n";
+// 	}
+// 	ROS_WARN("fst_history: \n%s", s.c_str());
+// 	s = "";
+// 	for (int k = 0; k <= history_size; k++) {
+// 	  for (double d : snd_history) {
+// 	    s += std::to_string(d); s += " ";
+// 	  }
+// 	  s += "\n";
+// 	}
+// 	ROS_WARN("snd_history: \n%s", s.c_str());
+	
+	double dist = distanceBtwTwoPoints(legs[fst_leg].getHistory()[j][0], 
+					   legs[fst_leg].getHistory()[j][1],
+	  legs[indices_of_potential_legs[i]].getHistory()[j][0], 
+	  legs[indices_of_potential_legs[i]].getHistory()[j][1]);
+	
+	ROS_WARN("dist btw (%f, %f) and (%f, %f): %f, ids: %d %d", legs[fst_leg].getHistory()[j][0], 
+					   legs[fst_leg].getHistory()[j][1],
+	  legs[indices_of_potential_legs[i]].getHistory()[j][0], 
+	  legs[indices_of_potential_legs[i]].getHistory()[j][1],
+		 dist, legs[fst_leg].getLegId(), legs[indices_of_potential_legs[i]].getLegId());
 	
 	if (dist > max_dist_btw_legs)
 	{
@@ -1004,7 +1019,7 @@ public:
         double forgettingFactor = std::pow(0.5, history_size - 1 - j);
         gain += forgettingFactor * (1 - dist / std::sqrt(200));
 
-      	fst_history_it++; snd_history_it++;
+//       	fst_history_it++; snd_history_it++;
 
       }
 
@@ -1014,7 +1029,7 @@ public:
       if (!isHistoryDistanceValid) { continue; }
       if (max_gain < gain) {
         max_gain = gain;
-        snd_leg = i;
+        snd_leg = indices_of_potential_legs[i];
       }
     }
 
@@ -1816,6 +1831,7 @@ public:
      while(i != v.size()) {
         if (v[i].is_dead()) {
 	    if (v[i].hasPair()) { resetHasPair(v, i); removed_legs.push_back(v[i]); }
+	    else if (v[i].getPeopleId() != -1) { removed_legs.push_back(v[i]); }
 	    removeLegFromVector(v, i);
         } else {
              i++;
