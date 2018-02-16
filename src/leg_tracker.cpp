@@ -931,10 +931,10 @@ public:
 
     if (indices_of_potential_legs.size() == 0) { ROS_DEBUG("There is no potential second leg!"); return; }
 
-    // if (indices_of_potential_legs.size() == 1) {
-    //   setPeopleId(fst_leg, indices_of_potential_legs[0], new_people, new_people_idx);
-    //   return;
-    // }
+    if (indices_of_potential_legs.size() == 1) {
+      setPeopleId(fst_leg, indices_of_potential_legs[0], new_people, new_people_idx);
+      return;
+    }
     int snd_leg = -1;
   	//snd_leg = findMatch(legs[fst_leg].getPos(), potential_legs, indices);
 
@@ -1339,6 +1339,9 @@ public:
 			{
 			  ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x,
 				legs[i].getPos().y, l.getPos().x, l.getPos().y, getPeopleMarkerNextId()));
+			  /*
+			  updatePersonList(id, (legs[i].getPos().x + l.getPos().x) / 2, 
+					   (legs[i].getPos().y + l.getPos().y) / 2);*/
 // 			  max_id++;
 
 // 			  ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2removed: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
@@ -1359,6 +1362,9 @@ public:
 	  {
 	    ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x,
 		legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, getPeopleMarkerNextId()));
+	    /*
+	    updatePersonList(id, (legs[i].getPos().x + l.getPos().x) / 2, 
+		(legs[i].getPos().y + l.getPos().y) / 2);*/
 // 	    max_id++;
 
 // 	    ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
@@ -1374,6 +1380,11 @@ public:
 
     people_pub.publish(ma_people);
   }
+  /*
+  void updatePersonList(int id, double x, double y)
+  {
+    
+  }*/
 
   unsigned int getPeopleMarkerNextId() {
     return people_marker_next_id++;
@@ -1899,7 +1910,7 @@ public:
                 double cov = it_prev->getMeasToTrackMatchingCov();
                 double mahalanobis_dist = std::sqrt((std::pow((p.x - it_prev->getPos().x), 2) +
                                                      std::pow((p.y - it_prev->getPos().y), 2)) / cov);
-                if (mahalanobis_dist < mahalanobis_dist_gate) {
+                if (mahalanobis_dist < 2 * mahalanobis_dist_gate) {
                   matrix(r,c) = mahalanobis_dist;
                 } else {
                   matrix(r,c) = max_cost;
@@ -1921,7 +1932,7 @@ public:
                       if (r < meas_count && c < tracks_count) {
                            // Does the measurement fall within 3 std's of
                            // the track?
-                           if (it_prev->is_within_region(new_people.points[meas_it],3)) {
+                           if (it_prev->is_within_region(new_people.points[meas_it], 3)) {
                                 // Found an assignment. Update the new measurement
                                 // with the track ID and age of older track. Add
                                 // to fused list
