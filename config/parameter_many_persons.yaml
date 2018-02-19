@@ -5,8 +5,8 @@ x_upper_limit: 1.0
 y_lower_limit: -1.0
 y_upper_limit: 2.8
 leg_radius: 0.1
-min_observations: 4
-min_predictions: 7
+min_observations: 3
+min_predictions: 5
 max_dist_btw_legs: 0.8
 z_coordinate: 0.178
 vel_stance_threshold: 0.47
@@ -17,7 +17,7 @@ minClusterSize: 3
 maxClusterSize: 100
 isOnePersonToTrack: false
 max_nn_gating_distance: 1.0
-occluded_dead_age: 10
+occluded_dead_age: 5
 variance_observation: 0.25
 min_dist_travelled: 0.25
 #history_size: 5

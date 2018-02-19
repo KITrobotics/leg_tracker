@@ -572,15 +572,18 @@ public:
 //       l.getPeopleId(), l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair());
 
 //       ma_leg.markers.push_back(getMarker(l.getPos().x, l.getPos().y, getNextLegsMarkerId()));
-      if (l.getObservations() == 0 || calculateNorm(l.getVel()) < 0.01) { continue; }
-      ma_leg.markers.push_back(getArrowMarker(l.getPos().x, l.getPos().y,
-	       l.getPos().x + 0.5 * l.getVel().x, l.getPos().y + 0.5 * l.getVel().y, getNextLegsMarkerId()));
+//       if (l.getObservations() == 0 || calculateNorm(l.getVel()) < 0.01) { continue; }
+      
+      double pos_x = l.getPos().x + std::min(l.getPos().x * 0.1, 0.5 * leg_radius);
+      double pos_y = l.getPos().y + std::min(l.getPos().y * 0.1, 0.5 * leg_radius);
+      ma_leg.markers.push_back(getArrowMarker(pos_x, pos_y,
+	       pos_x + 0.5 * l.getVel().x, pos_y + 0.5 * l.getVel().y, getNextLegsMarkerId()));
     }
     legs_and_vel_direction_publisher.publish(ma_leg);
     
-    if (legs.size() != 2) {
-      return;
-    }
+//     if (legs.size() != 2) {
+//       return;
+//     }
 //     if (legs[0].getHistory().size() < 1 && legs[1].getHistory().size() < 1) { return; }
 //     bool isLeft = legs[0].getPos().x < legs[1].getPos().x;
 //     pub_leg_posvelacc(legs[0].getHistory().back(), isLeft);
@@ -1440,7 +1443,7 @@ public:
     tree->setInputCloud (cloud.makeShared());
     std::vector<pcl::PointIndices> cluster_indices;
     pcl::EuclideanClusterExtraction<Point> ec;
-    ec.setClusterTolerance (clusterTolerance); // 4cm
+    ec.setClusterTolerance (clusterTolerance); 
     ec.setMinClusterSize (minClusterSize);
     ec.setMaxClusterSize (maxClusterSize);
     ec.setSearchMethod (tree);
@@ -1449,39 +1452,118 @@ public:
 
     cluster_centroids.header = cloud.header;
     cluster_centroids.points.clear();
+    
+    PointCloud cluster_centroids_temp, leg_positions;
+    cluster_centroids_temp.header = cloud.header;
+    leg_positions.header = cloud.header;
 
-    int j = 0;
     for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
     {
       pcl::PointCloud<Point>::Ptr cloud_cluster (new pcl::PointCloud<Point>);
       cloud_cluster->header = cloud.header;
       for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit)
 	cloud_cluster->points.push_back (cloud.points[*pit]); //*
-      cloud_cluster->width = cloud_cluster->points.size ();
+      cloud_cluster->width = cloud_cluster->points.size();
       cloud_cluster->height = 1;
       cloud_cluster->is_dense = true;
 
-
-//       std::cout << "PointCloud representing the Cluster: " << cloud_cluster->points.size () << " data points." << std::endl;
-
-
-      std::vector<double> c;
-      computeCircularity(cloud_cluster, c);
-
-      if (c.size() == 2)
-      {
-	Point p; p.x = c[0]; p.y = c[1];
-	cluster_centroids.points.push_back(p);
-// 	pub_circle_with_id(c[0], c[1], j);
+//       std::vector<double> c;
+      //computeCircularity(cloud_cluster, c);
+      
+      Eigen::Vector4f centroid;
+      pcl::compute3DCentroid(*cloud_cluster, centroid);
+      
+    
+      Point p; p.x = centroid(0); p.y = centroid(1);
+      cluster_centroids_temp.points.push_back(p);
+      
+    }
+    
+    for (Leg& l : legs) 
+    {
+      leg_positions.points.push_back(l.getPos());
+    }
+    
+    if (cluster_centroids_temp.points.size() == 0) { return true; }
+    if (leg_positions.points.size() == 0) 
+    {
+      cluster_centroids = cluster_centroids_temp;
+      return true;
+    }
+    
+    pcl::KdTreeFLANN<Point> kdtree_clusters, kdtree_legs;
+    kdtree_clusters.setInputCloud(cluster_centroids_temp.makeShared());
+    kdtree_legs.setInputCloud(leg_positions.makeShared());
+    
+    
+    double radius = 1.9 * leg_radius;
+    
+    std::map<int, bool> map_removed_indices;
+    
+    for (int i = 0; i < cluster_centroids_temp.points.size(); i++)
+    {
+      std::map<int, bool>::iterator removed_indices_it = map_removed_indices.find(i);
+      if (removed_indices_it != map_removed_indices.end()) { continue; }
+      
+      Point cluster = cluster_centroids_temp.points[i];
+      std::vector<int> pointIdxRadius_clusters, pointIdxRadius_legs;
+      std::vector<float> pointsSquaredDistRadius_clusters, pointsSquaredDistRadius_legs;
+      // radius search
+      int count_clusters = kdtree_clusters.radiusSearch(cluster, radius, pointIdxRadius_clusters, 
+							pointsSquaredDistRadius_clusters);
+      int count_legs = kdtree_legs.radiusSearch(cluster, radius, pointIdxRadius_legs, 
+						pointsSquaredDistRadius_legs);
+      
+      if (count_clusters < count_legs) 
+      { // divide
+	std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin();
+	it += i;
+	PointCloud fst, snd;
+	fst.header = cloud.header;
+	snd.header = cloud.header;
+	for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit)
+	{ 
+	  Point p = cloud.points[*pit];
+	  double dot_product = p.x * cluster.x - cluster.y * p.y;
+	  if (dot_product < 0) { fst.points.push_back(p); }
+	  else { snd.points.push_back(p); }
+	}
+	
+	Eigen::Vector4f centroid_fst, centroid_snd;
+	pcl::compute3DCentroid(fst, centroid_fst);
+	pcl::compute3DCentroid(snd, centroid_snd);
+	
+	Point p_fst, p_snd;
+	p_fst.x = centroid_fst(0); p_fst.y = centroid_fst(1);
+	p_snd.x = centroid_snd(0); p_snd.y = centroid_snd(1);
+	
+	cluster_centroids.points.push_back(p_fst);
+	cluster_centroids.points.push_back(p_snd);
       }
-//       std::stringstream ss;
-//       ss << "cloud_cluster_" << j << ".pcd";
-//       writer.write<Point> (ss.str (), *cloud_cluster, false); //*
-      j++;
+      else if (count_clusters > count_legs)
+      { // bring together
+	PointCloud gathered_clusters;
+	gathered_clusters.header = cloud.header;
+	
+	for (int j : pointIdxRadius_clusters) 
+	{
+	  map_removed_indices.insert(std::make_pair(j, true));
+	  gathered_clusters.points.push_back(cluster_centroids_temp.points[j]);
+	}
+	
+	Eigen::Vector4f centroid;
+	pcl::compute3DCentroid(gathered_clusters, centroid);
+	Point p; p.x = centroid(0); p.y = centroid(1);
+	
+	cluster_centroids.points.push_back(p);
+      }
+      else
+      {
+	cluster_centroids.points.push_back(cluster);
+      }
     }
 //     pcl_cloud_publisher.publish(cluster_centroids);
 
- //   std::cout << "clusters: " << j << " datas." << std::endl;
     return true;
   }
 
