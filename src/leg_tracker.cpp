@@ -32,6 +32,7 @@
 #include <iostream>
 #include <iirob_filters/kalman_filter.h>
 #include <pcl/common/centroid.h>
+#include <pcl/common/common.h>
 #include <iirob_filters/KalmanFilterParameters.h>
 #include <std_msgs/Float64MultiArray.h>
 #include <pcl/kdtree/kdtree.h>
@@ -574,8 +575,10 @@ public:
 //       ma_leg.markers.push_back(getMarker(l.getPos().x, l.getPos().y, getNextLegsMarkerId()));
 //       if (l.getObservations() == 0 || calculateNorm(l.getVel()) < 0.01) { continue; }
       
-      double pos_x = l.getPos().x + std::min(l.getPos().x * 0.1, 0.5 * leg_radius);
-      double pos_y = l.getPos().y + std::min(l.getPos().y * 0.1, 0.5 * leg_radius);
+//       double pos_x = l.getPos().x + std::min(l.getPos().x * 0.1, 0.3 * leg_radius);
+//       double pos_y = l.getPos().y + std::min(l.getPos().y * 0.1, 0.5 * leg_radius);
+      double pos_x = l.getPos().x;
+      double pos_y = l.getPos().y;
       ma_leg.markers.push_back(getArrowMarker(pos_x, pos_y,
 	       pos_x + 0.5 * l.getVel().x, pos_y + 0.5 * l.getVel().y, getNextLegsMarkerId()));
     }
@@ -923,7 +926,8 @@ public:
     for (int i = fst_leg + 1; i < legs.size(); i++)
     {
       if (/*i == fst_leg || */legs[i].hasPair() || legs[i].getObservations() < min_observations
-	       || distanceBtwTwoPoints(legs[fst_leg].getPos(), legs[i].getPos()) > max_dist_btw_legs)
+	|| distanceBtwTwoPoints(legs[fst_leg].getPos(), legs[i].getPos()) > max_dist_btw_legs
+	|| distanceBtwTwoPoints(legs[fst_leg].getPos(), legs[i].getPos()) < leg_radius)
       {
 	      continue;
       }
@@ -1341,8 +1345,12 @@ public:
 		{
 			if (l.getPeopleId() == id)
 			{
-			  ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x,
-				legs[i].getPos().y, l.getPos().x, l.getPos().y, getPeopleMarkerNextId()));
+			  ma_people.markers.push_back(getOvalMarker(
+			    legs[i].getPos().x,
+			    legs[i].getPos().y,
+			    l.getPos().x, 
+			    l.getPos().y, 
+			    getPeopleMarkerNextId()));
 			  /*
 			  updatePersonList(id, (legs[i].getPos().x + l.getPos().x) / 2, 
 					   (legs[i].getPos().y + l.getPos().y) / 2);*/
@@ -1356,31 +1364,31 @@ public:
 			}
 		}
 
-	}
-
-      if (legs[i].hasPair())
-      {
-	for (int j = i + 1; j < legs.size(); j++)
+	} 
+	else 
 	{
-	  if (legs[j].getPeopleId() == id)
+	  for (int j = i + 1; j < legs.size(); j++)
 	  {
-	    ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x,
-		legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, getPeopleMarkerNextId()));
+	    if (legs[j].getPeopleId() == id)
+	    {
+	      ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x,
+		  legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, getPeopleMarkerNextId()));
+	      break;
 
-	    /*
-	    updatePersonList(id, (legs[i].getPos().x + l.getPos().x) / 2, 
-		(legs[i].getPos().y + l.getPos().y) / 2);*/
+	      /*
+	      updatePersonList(id, (legs[i].getPos().x + l.getPos().x) / 2, 
+		  (legs[i].getPos().y + l.getPos().y) / 2);*/
 
-// 	    max_id++;
+  // 	    max_id++;
 
-// 	    ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
-// 	    id, legs[i].getPos().x, legs[i].getPos().y,
-// 		     legs[j].getPos().x, legs[j].getPos().y,
-// 		     legs[i].getPredictions(), legs[j].getPredictions(),
-// 		      legs[i].getObservations(), legs[j].getObservations(),
-// 		     legs[i].hasPair(), legs[j].hasPair());
+  // 	    ROS_INFO("VISpeople peopleId: %d, pos1: (%f, %f), pos2: (%f, %f), predictions: (%d, %d), observations: (%d, %d), hasPair: (%d, %d)",
+  // 	    id, legs[i].getPos().x, legs[i].getPos().y,
+  // 		     legs[j].getPos().x, legs[j].getPos().y,
+  // 		     legs[i].getPredictions(), legs[j].getPredictions(),
+  // 		      legs[i].getObservations(), legs[j].getObservations(),
+  // 		     legs[i].hasPair(), legs[j].hasPair());
+	    }
 	  }
-	}
       }
     }
 
@@ -1437,7 +1445,6 @@ public:
   {
 
     if (cloud.points.size() < minClusterSize) { ROS_DEBUG("Clustering: Too small number of points!"); return false; }
-//     pcl::PCDWriter writer;
 
     pcl::search::KdTree<Point>::Ptr tree (new pcl::search::KdTree<Point>);
     tree->setInputCloud (cloud.makeShared());
@@ -1456,6 +1463,19 @@ public:
     PointCloud cluster_centroids_temp, leg_positions;
     cluster_centroids_temp.header = cloud.header;
     leg_positions.header = cloud.header;
+    
+    for (Leg& l : legs) 
+    {
+      if (calculateNorm(l.getVel()) < 0.2)
+      {
+	leg_positions.points.push_back(l.getPos());
+      }
+    }
+    pcl::KdTreeFLANN<Point> kdtree_clusters, kdtree_legs;
+    
+    if (leg_positions.points.size() != 0) {
+      kdtree_legs.setInputCloud(leg_positions.makeShared());
+    }
 
     for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
     {
@@ -1475,28 +1495,41 @@ public:
       
     
       Point p; p.x = centroid(0); p.y = centroid(1);
-      cluster_centroids_temp.points.push_back(p);
+      
+      
+      if (leg_positions.points.size() != 0) {
+	std::vector<int> pointIdxRadius;
+	std::vector<float> pointsSquaredDistRadius;
+	// radius search
+	int count = kdtree_legs.radiusSearch(p, 0.02, pointIdxRadius, 
+							  pointsSquaredDistRadius);
+	if (count == 1) {
+	  cluster_centroids_temp.points.push_back(leg_positions.points[pointIdxRadius[0]]);
+	} else {
+	  cluster_centroids_temp.points.push_back(p);
+	}
+      } else {
+	cluster_centroids.points.push_back(p);
+	return true;
+      }
       
     }
     
-    for (Leg& l : legs) 
-    {
-      leg_positions.points.push_back(l.getPos());
-    }
+    
+    ROS_WARN("\ncluster_centroids_temp\n");
+    printCloudPoints(cluster_centroids_temp);
+    
+    
+    
+    ROS_WARN("\nleg_positions\n");
+    printCloudPoints(leg_positions);
     
     if (cluster_centroids_temp.points.size() == 0) { return true; }
-    if (leg_positions.points.size() == 0) 
-    {
-      cluster_centroids = cluster_centroids_temp;
-      return true;
-    }
     
-    pcl::KdTreeFLANN<Point> kdtree_clusters, kdtree_legs;
     kdtree_clusters.setInputCloud(cluster_centroids_temp.makeShared());
-    kdtree_legs.setInputCloud(leg_positions.makeShared());
     
     
-    double radius = 1.9 * leg_radius;
+    double radius = 0.2;
     
     std::map<int, bool> map_removed_indices;
     
@@ -1514,19 +1547,41 @@ public:
       int count_legs = kdtree_legs.radiusSearch(cluster, radius, pointIdxRadius_legs, 
 						pointsSquaredDistRadius_legs);
       
+      ROS_WARN("i: %d, count_clusters: %d, count_legs: %d", i, count_clusters, count_legs);
+      
       if (count_clusters < count_legs) 
       { // divide
 	std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin();
 	it += i;
+	std::vector<int>::const_iterator pit_front = it->indices.begin(),
+					 pit_back = it->indices.end(); pit_back--;
+	double dist_front_last = distanceBtwTwoPoints(cloud.points[*pit_front], cloud.points[*pit_back]);
+	ROS_WARN("dist_front_last: %f", dist_front_last);
+	if (it->indices.size() < 25 || 
+	  dist_front_last < radius) 
+	{
+	  cluster_centroids.points.push_back(cluster);
+	  continue;
+	}
+	
+	
+	
 	PointCloud fst, snd;
 	fst.header = cloud.header;
 	snd.header = cloud.header;
-	for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit)
+	for (std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); ++pit)
 	{ 
 	  Point p = cloud.points[*pit];
-	  double dot_product = p.x * cluster.x - cluster.y * p.y;
+	  double dot_product = p.x * cluster.y - cluster.x * p.y;
 	  if (dot_product < 0) { fst.points.push_back(p); }
 	  else { snd.points.push_back(p); }
+	}
+	ROS_WARN("fst.points.size: %d, snd.points.size: %d", fst.points.size(), snd.points.size());
+	
+	if (fst.points.size() < minClusterSize || snd.points.size() < minClusterSize) 
+	{
+	  cluster_centroids.points.push_back(cluster);
+	  continue;
 	}
 	
 	Eigen::Vector4f centroid_fst, centroid_snd;
@@ -1536,6 +1591,17 @@ public:
 	Point p_fst, p_snd;
 	p_fst.x = centroid_fst(0); p_fst.y = centroid_fst(1);
 	p_snd.x = centroid_snd(0); p_snd.y = centroid_snd(1);
+	  
+	ROS_INFO("Point fst: (%f, %f)", p_fst.x, p_fst.y);
+	ROS_INFO("Point snd: (%f, %f)", p_snd.x, p_snd.y);
+	ROS_INFO("distanceBtwTwoPoints(p_fst, p_snd): %f", distanceBtwTwoPoints(p_fst, p_snd));
+	
+	
+	if (distanceBtwTwoPoints(p_fst, p_snd) < leg_radius) 
+	{
+	  cluster_centroids.points.push_back(cluster);
+	  continue;
+	}
 	
 	cluster_centroids.points.push_back(p_fst);
 	cluster_centroids.points.push_back(p_snd);
@@ -1547,6 +1613,14 @@ public:
 	
 	for (int j : pointIdxRadius_clusters) 
 	{
+	  if (j > 0 && gathered_clusters.points.size() > 0 && j > i) 
+	  { 
+	    if (distanceBtwTwoPoints(gathered_clusters.points[0], 
+	    cluster_centroids_temp.points[j]) >= leg_radius) 
+	    {
+	      continue;
+	    }
+	  }
 	  map_removed_indices.insert(std::make_pair(j, true));
 	  gathered_clusters.points.push_back(cluster_centroids_temp.points[j]);
 	}
@@ -1562,8 +1636,9 @@ public:
 	cluster_centroids.points.push_back(cluster);
       }
     }
+    ROS_WARN("\ncluster_centroids\n");
+    printCloudPoints(cluster_centroids);
 //     pcl_cloud_publisher.publish(cluster_centroids);
-
     return true;
   }
 
@@ -2390,15 +2465,15 @@ public:
     if (!clustering(filteredCloudXYZ, cluster_centroids)) { predictLegs(); return; }
 
 
-    ROS_WARN("vor: ");
-    printLegsInfo();
+//     ROS_WARN("vor: ");
+//     printLegsInfo();
     if (isOnePersonToTrack) {
       matchLegCandidates(cluster_centroids);
     } else {
       gnn_munkres(cluster_centroids);
     }
-    ROS_WARN("nach: ");
-    printLegsInfo();
+//     ROS_WARN("nach: ");
+//     printLegsInfo();
     visLegs();
 //     checkPeopleId();
     PointCloud new_people;
