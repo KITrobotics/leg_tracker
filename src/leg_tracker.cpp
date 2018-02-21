@@ -516,13 +516,13 @@ public:
 
   void printLegsInfo()
   {
+    ROS_INFO("\n\nremoved_legs\n\n");
     for (Leg& l : removed_legs)
     {
-      ROS_INFO("\n\nremoved_legs\n\n");
       ROS_INFO("legId: %d, peopleId: %d, pos: (%f, %f), observations: %d, hasPair: %d, missed: %d",
       l.getLegId(), l.getPeopleId(), l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair(), l.getOccludedAge());
     }
-      ROS_INFO("\n\n\legs\n\n");
+    ROS_INFO("\n\nlegs\n\n");
     for (Leg& l : legs)
     {
       ROS_INFO("legId: %d, peopleId: %d, pos: (%f, %f), observations: %d, hasPair: %d, missed: %d",
@@ -1472,12 +1472,15 @@ public:
     cluster_centroids_temp.header = cloud.header;
     leg_positions.header = cloud.header;
     
+    std::vector<std::pair<Point, Point> > minMaxPoints;
+    double minMaxUncertainty = 0.02;
+    
     for (Leg& l : legs) 
     {
-      if (calculateNorm(l.getVel()) < 0.2)
-      {
+//       if (calculateNorm(l.getVel()) < 0.4)
+//       {
 	leg_positions.points.push_back(l.getPos());
-      }
+//       }
     }
     pcl::KdTreeFLANN<Point> kdtree_clusters, kdtree_legs;
     
@@ -1497,6 +1500,15 @@ public:
 
 //       std::vector<double> c;
       //computeCircularity(cloud_cluster, c);
+      
+      Point min, max;
+      pcl::getMinMax3D(*cloud_cluster, min, max);
+      min.x -= minMaxUncertainty;
+      min.y -= minMaxUncertainty; 
+      max.x += minMaxUncertainty; 
+      max.y += minMaxUncertainty; 
+      minMaxPoints.push_back(std::make_pair(min, max));
+      
       
       Eigen::Vector4f centroid;
       pcl::compute3DCentroid(*cloud_cluster, centroid);
@@ -1540,6 +1552,7 @@ public:
     double radius = 0.2;
     
     std::map<int, bool> map_removed_indices;
+//     std::map<int, bool> map_removed_leg_indices;
     
     for (int i = 0; i < cluster_centroids_temp.points.size(); i++)
     {
@@ -1549,28 +1562,77 @@ public:
       Point cluster = cluster_centroids_temp.points[i];
       std::vector<int> pointIdxRadius_clusters, pointIdxRadius_legs;
       std::vector<float> pointsSquaredDistRadius_clusters, pointsSquaredDistRadius_legs;
+      
+      int K = 2;
+      std::vector<int> pointsIdx(K);
+      std::vector<float> pointsSquaredDist(K);
+      
+      
       // radius search
-      int count_clusters = kdtree_clusters.radiusSearch(cluster, radius, pointIdxRadius_clusters, 
-							pointsSquaredDistRadius_clusters);
-      int count_legs = kdtree_legs.radiusSearch(cluster, radius, pointIdxRadius_legs, 
-						pointsSquaredDistRadius_legs);
+//       int count_clusters = kdtree_clusters.radiusSearch(cluster, radius, pointIdxRadius_clusters, 
+// 							pointsSquaredDistRadius_clusters);
       
-      ROS_WARN("i: %d, count_clusters: %d, count_legs: %d", i, count_clusters, count_legs);
+//       int count_legs = kdtree_legs.radiusSearch(cluster, radius, pointIdxRadius_legs, 
+// 						pointsSquaredDistRadius_legs);
+      int count_legs = kdtree_legs.nearestKSearch (cluster, K, pointsIdx, pointsSquaredDist);
       
-      if (count_clusters < count_legs) 
+      
+      if (pointsIdx.size() != K) { 
+	cluster_centroids.points.push_back(cluster); 
+	continue; 
+      }
+      
+//       std::map<int, bool>::iterator removed_leg_indices_it = map_removed_leg_indices.find(pointsIdx[0]);
+//       if (removed_indices_it != map_removed_leg_indices.end()) { 
+// 	cluster_centroids.points.push_back(cluster); 
+// 	continue;
+//       }
+      
+//       removed_leg_indices_it = map_removed_leg_indices.find(pointsIdx[1]);
+//       if (removed_indices_it != map_removed_leg_indices.end()) { 
+// 	cluster_centroids.points.push_back(cluster); 
+// 	continue;
+//       }
+      
+      
+      Point fst_leg, snd_leg;
+      fst_leg = leg_positions[pointsIdx[0]];
+      snd_leg = leg_positions[pointsIdx[1]];
+      bool isFstPointInBox = (fst_leg.x >= minMaxPoints[i].first.x) && (fst_leg.y >= minMaxPoints[i].first.y)
+	&& (fst_leg.x <= minMaxPoints[i].second.x) && (fst_leg.y <= minMaxPoints[i].second.y);
+      bool isSndPointInBox = (snd_leg.x >= minMaxPoints[i].first.x) && (snd_leg.y >= minMaxPoints[i].first.y)
+	&& (snd_leg.x <= minMaxPoints[i].second.x) && (snd_leg.y <= minMaxPoints[i].second.y);
+      
+      ROS_INFO("\n\ndivide:");
+      ROS_INFO("Point fst_leg: (%f, %f)", fst_leg.x, fst_leg.y);
+      ROS_INFO("Point snd_leg: (%f, %f)", snd_leg.x, snd_leg.y);
+//       ROS_WARN("i: %d, count_clusters: %d, count_legs: %d", i, count_clusters, count_legs);
+      
+//       if (count_clusters < count_legs) 
+      if (isFstPointInBox && isSndPointInBox)
       { // divide
+	
+	ROS_INFO("\n\ndivide happens:");
+	pub_border(minMaxPoints[i].first.x, minMaxPoints[i].first.y, 
+	  minMaxPoints[i].second.x, minMaxPoints[i].second.y);
+	
+	
+// 	map_removed_leg_indices.insert(std::make_pair(pointsIdx[0], true));
+// 	map_removed_leg_indices.insert(std::make_pair(pointsIdx[1], true));
+	
+	
 	std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin();
 	it += i;
-	std::vector<int>::const_iterator pit_front = it->indices.begin(),
-					 pit_back = it->indices.end(); pit_back--;
-	double dist_front_last = distanceBtwTwoPoints(cloud.points[*pit_front], cloud.points[*pit_back]);
-	ROS_WARN("dist_front_last: %f", dist_front_last);
-	if (it->indices.size() < 25 || 
-	  dist_front_last < radius) 
-	{
-	  cluster_centroids.points.push_back(cluster);
-	  continue;
-	}
+// 	std::vector<int>::const_iterator pit_front = it->indices.begin(),
+// 					 pit_back = it->indices.end(); pit_back--;
+// 	double dist_front_last = distanceBtwTwoPoints(cloud.points[*pit_front], cloud.points[*pit_back]);
+// 	ROS_WARN("dist_front_last: %f", dist_front_last);
+// 	if (it->indices.size() < 25 || 
+// 	  dist_front_last < radius) 
+// 	{
+// 	  cluster_centroids.points.push_back(cluster);
+// 	  continue;
+// 	}
 	
 	
 	
@@ -1614,31 +1676,31 @@ public:
 	cluster_centroids.points.push_back(p_fst);
 	cluster_centroids.points.push_back(p_snd);
       }
-      else if (count_clusters > count_legs)
-      { // bring together
-	PointCloud gathered_clusters;
-	gathered_clusters.header = cloud.header;
-	
-	for (int j : pointIdxRadius_clusters) 
-	{
-	  if (j > 0 && gathered_clusters.points.size() > 0 && j > i) 
-	  { 
-	    if (distanceBtwTwoPoints(gathered_clusters.points[0], 
-	    cluster_centroids_temp.points[j]) >= leg_radius) 
-	    {
-	      continue;
-	    }
-	  }
-	  map_removed_indices.insert(std::make_pair(j, true));
-	  gathered_clusters.points.push_back(cluster_centroids_temp.points[j]);
-	}
-	
-	Eigen::Vector4f centroid;
-	pcl::compute3DCentroid(gathered_clusters, centroid);
-	Point p; p.x = centroid(0); p.y = centroid(1);
-	
-	cluster_centroids.points.push_back(p);
-      }
+//       else if (count_clusters > count_legs)
+//       { // bring together
+// 	PointCloud gathered_clusters;
+// 	gathered_clusters.header = cloud.header;
+// 	
+// 	for (int j : pointIdxRadius_clusters) 
+// 	{
+// 	  if (j > 0 && gathered_clusters.points.size() > 0 && j > i) 
+// 	  { 
+// 	    if (distanceBtwTwoPoints(gathered_clusters.points[0], 
+// 	    cluster_centroids_temp.points[j]) >= leg_radius) 
+// 	    {
+// 	      continue;
+// 	    }
+// 	  }
+// 	  map_removed_indices.insert(std::make_pair(j, true));
+// 	  gathered_clusters.points.push_back(cluster_centroids_temp.points[j]);
+// 	}
+// 	
+// 	Eigen::Vector4f centroid;
+// 	pcl::compute3DCentroid(gathered_clusters, centroid);
+// 	Point p; p.x = centroid(0); p.y = centroid(1);
+// 	
+// 	cluster_centroids.points.push_back(p);
+//       }
       else
       {
 	cluster_centroids.points.push_back(cluster);
@@ -1649,6 +1711,39 @@ public:
 //     pcl_cloud_publisher.publish(cluster_centroids);
     return true;
   }
+  
+    void pub_border(double min_x, double min_y, double max_x, double max_y)
+  {
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = transform_link;
+    marker.header.stamp = ros::Time();
+    marker.ns = nh_.getNamespace();
+//     marker.id = id;
+    marker.type = visualization_msgs::Marker::CUBE;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.position.x = (max_x + min_x) / 2;
+    marker.pose.position.y = (max_y + min_y) / 2;
+    marker.pose.position.z = z_coordinate;
+//     marker.pose.orientation.x = orientation_x;
+//     marker.pose.orientation.y = orientation_y;
+//     marker.pose.orientation.z = orientation_z;
+//     marker.pose.orientation.w = orientation_w;
+    marker.scale.x = max_x - min_x;
+    marker.scale.y = max_y - min_y;
+//     marker.scale.z = 0;
+    marker.color.a = 1.0; // Don't forget to set the alpha!
+    marker.color.g = 1.0;
+//     if (id == 0)
+//       marker.color.r = 1.0;
+//     if (id == 2)
+//       marker.color.g = 1.0;
+//     if (id == 1)
+//       marker.color.b = 1.0;
+    //only if using a MESH_RESOURCE marker type:
+//     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
+    tracking_area_pub.publish( marker );
+  }
+  
 
   /*void sortPointCloudToLeftAndRight(const PointCloud& input_cloud, PointCloud::Ptr left, PointCloud::Ptr right)
   {
@@ -2009,7 +2104,7 @@ public:
    {
      int i = 0;
      while(i != v.size()) {
-        if (v[i].is_dead() || v[i].getMeasToTrackMatchingCov() > max_cov) {
+        if (v[i].is_dead()/* || v[i].getMeasToTrackMatchingCov() > max_cov*/) {
 	    if (v[i].hasPair()) { resetHasPair(v, i); removed_legs.push_back(v[i]); }
 	    else if (v[i].getPeopleId() != -1) { removed_legs.push_back(v[i]); }
 	    removeLegFromVector(v, i);
@@ -2189,7 +2284,7 @@ public:
 	      if (dist <= 0.02)
 	      {
 		matrix(r, c) = 0;
-	      } else if (mahalanobis_dist < mahalanobis_dist_gate && dist < max_dist_btw_legs) {
+	      } else if (mahalanobis_dist < mahalanobis_dist_gate && dist < 0.5 * max_dist_btw_legs) {
 		matrix(r, c) = mahalanobis_dist;
 	      } else {
 		matrix(r, c) = max_cost;
@@ -2459,7 +2554,7 @@ public:
 
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
-    pub_border_square();
+//     pub_border_square();
 //     pub_line((x_upper_limit - x_lower_limit) / 2, y_lower_limit);
 //     pub_line((x_upper_limit - x_lower_limit) / 2, y_upper_limit);
 //     pub_line(x_lower_limit, (y_upper_limit - y_lower_limit) / 2);

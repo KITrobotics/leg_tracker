@@ -64,7 +64,7 @@ public:
 
     peopleId = -1;
     hasPair_ = false;
-    observations = 0;
+    observations = 1;
     distance_traveled = 0.;
 
     std::vector<double> in;
