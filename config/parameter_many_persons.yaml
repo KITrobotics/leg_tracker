@@ -20,4 +20,5 @@ max_nn_gating_distance: 1.0
 occluded_dead_age: 5
 variance_observation: 0.25
 min_dist_travelled: 0.25
+max_cov: 0.81
 #history_size: 5

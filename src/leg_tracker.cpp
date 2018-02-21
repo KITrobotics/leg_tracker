@@ -125,8 +125,8 @@ private:
   int people_marker_next_id;
   int next_leg_id;
 
-  double max_nn_gating_distance;
-
+//   double max_nn_gating_distance;
+  double max_cov;
   double min_dist_travelled;
 
   //mht
@@ -174,7 +174,7 @@ public:
     nh_.param("leg_radius", leg_radius, 0.1);
     nh_.param("min_observations", min_observations, 4);
     // nh_.param("min_predictions", min_predictions, 7);
-    nh_.param("max_dist_btw_legs", max_dist_btw_legs, 1.0);
+    nh_.param("max_dist_btw_legs", max_dist_btw_legs, 0.8);
     nh_.param("z_coordinate", z_coordinate, 0.178);
     nh_.param("vel_stance_threshold", vel_stance_threshold, 0.47);
     nh_.param("vel_swing_threshold", vel_swing_threshold, 0.93);
@@ -183,10 +183,11 @@ public:
     nh_.param("maxClusterSize", maxClusterSize, 100);
     nh_.param("clusterTolerance", clusterTolerance, 0.07);
     nh_.param("isOnePersonToTrack", isOnePersonToTrack, false);
-    nh_.param("max_nn_gating_distance", max_nn_gating_distance, 1.0);
+//     nh_.param("max_nn_gating_distance", max_nn_gating_distance, 1.0);
     nh_.param("occluded_dead_age", occluded_dead_age, 10);
     nh_.param("variance_observation", variance_observation, 0.25);
     nh_.param("min_dist_travelled", min_dist_travelled, 0.25);
+    nh_.param("max_cov", max_cov, 0.81);
 
 
     legs_gathered = id_counter = legs_marker_next_id = next_leg_id = people_marker_next_id = 0;
@@ -515,10 +516,17 @@ public:
 
   void printLegsInfo()
   {
+    for (Leg& l : removed_legs)
+    {
+      ROS_INFO("\n\nremoved_legs\n\n");
+      ROS_INFO("legId: %d, peopleId: %d, pos: (%f, %f), observations: %d, hasPair: %d, missed: %d",
+      l.getLegId(), l.getPeopleId(), l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair(), l.getOccludedAge());
+    }
+      ROS_INFO("\n\n\legs\n\n");
     for (Leg& l : legs)
     {
-      ROS_INFO("legId: %d, peopleId: %d, pos: (%f, %f), observations: %d, hasPair: %d",
-      l.getLegId(), l.getPeopleId(), l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair());
+      ROS_INFO("legId: %d, peopleId: %d, pos: (%f, %f), observations: %d, hasPair: %d, missed: %d",
+      l.getLegId(), l.getPeopleId(), l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair(), l.getOccludedAge());
     }
   }
 
@@ -1977,14 +1985,14 @@ public:
       v.pop_back();
    }
 
-   void removePersonFromVector(std::vector<Person>& v, int i)
-   {
-      if (i != v.size() - 1) {
-	Person p = v[v.size() - 1];
-	v[i] = p;
-      }
-      v.pop_back();
-   }
+//    void removePersonFromVector(std::vector<Person>& v, int i)
+//    {
+//       if (i != v.size() - 1) {
+// 	Person p = v[v.size() - 1];
+// 	v[i] = p;
+//       }
+//       v.pop_back();
+//    }
 
    void resetHasPair(std::vector<Leg>& v, int fst_leg)
    {
@@ -2001,7 +2009,7 @@ public:
    {
      int i = 0;
      while(i != v.size()) {
-        if (v[i].is_dead()) {
+        if (v[i].is_dead() || v[i].getMeasToTrackMatchingCov() > max_cov) {
 	    if (v[i].hasPair()) { resetHasPair(v, i); removed_legs.push_back(v[i]); }
 	    else if (v[i].getPeopleId() != -1) { removed_legs.push_back(v[i]); }
 	    removeLegFromVector(v, i);
@@ -2011,123 +2019,124 @@ public:
      }
    }
 
-   void cullDeadTracksOfPersons(std::vector<Person>& v)
-   {
-     int i = 0;
-     while(i != v.size()) {
-        if (v[i].is_dead()) {
-	    removePersonFromVector(v, i);
-        } else {
-             i++;
-        }
-     }
-   }
+//    void cullDeadTracksOfPersons(std::vector<Person>& v)
+//    {
+//      int i = 0;
+//      while(i != v.size()) {
+//         if (v[i].is_dead()) {
+// 	    removePersonFromVector(v, i);
+//         } else {
+//              i++;
+//         }
+//      }
+//    }
 
 
-   void gnn_munkres_people(const PointCloud& new_people, std::vector<int>& new_people_idx)
-   {
-      // Filter model predictions
-      for(std::vector<Person>::iterator it = persons.begin();
-          it != persons.end(); it++) {
-           it->predict();
-      }
-      std::vector<Person> fused;
+//    void gnn_munkres_people(const PointCloud& new_people, std::vector<int>& new_people_idx)
+//    {
+//       // Filter model predictions
+//       for(std::vector<Person>::iterator it = persons.begin();
+//           it != persons.end(); it++) {
+//            it->predict();
+//       }
+//       std::vector<Person> fused;
+// 
+//       assign_munkres_people(new_people, persons, fused, new_people_idx);
+// 
+//       cullDeadTracksOfPersons(fused);
+// 
+//       persons = fused;
+//    }
 
-      assign_munkres_people(new_people, persons, fused, new_people_idx);
-
-      cullDeadTracksOfPersons(fused);
-
-      persons = fused;
-   }
-
-   void assign_munkres_people(const PointCloud& new_people,
-                         std::vector<Person> &tracks,
-                         std::vector<Person> &fused, std::vector<int>& new_people_idx)
-   {
-     // Create cost matrix between previous and current blob centroids
-       int meas_count = new_people.points.size();
-       int tracks_count = tracks.size();
-
-       // Determine max of meas_count and tracks
-       int rows = -1, cols = -1;
-       if (meas_count >= tracks_count) {
-            rows = cols = meas_count;
-       } else {
-            rows = cols = tracks_count;
-       }
-
-       Matrix<double> matrix(rows, cols);
-
-       // New measurements are along the Y-axis (left hand side)
-       // Previous tracks are along x-axis (top-side)
-       int r = 0;
-       for(const Point& p : new_people.points) {
-            std::vector<Person>::iterator it_prev = tracks.begin();
-            int c = 0;
-            for (; it_prev != tracks.end(); it_prev++, c++) {
-              // if (it_prev->isPerson() and not it_prev->isInFreeSpace()) {
-              //   matrix(r,c) = max_cost;
-              // } else {
-                double cov = it_prev->getMeasToTrackMatchingCov();
-                double mahalanobis_dist = std::sqrt((std::pow((p.x - it_prev->getPos().x), 2) +
-                                                     std::pow((p.y - it_prev->getPos().y), 2)) / cov);
-
-                if (mahalanobis_dist < mahalanobis_dist_gate) {
-                  matrix(r,c) = mahalanobis_dist;
-                } else {
-                  matrix(r,c) = max_cost;
-                }
-              // }
-            }
-            r++;
-       }
-
-       Munkres<double> m;
-       m.solve(matrix);
-
-       // Use the assignment to update the old tracks with new blob measurement
-       int meas_it = 0;
-       for(r = 0; r < rows; r++) {
-            std::vector<Person>::iterator it_prev = tracks.begin();
-            for (int c = 0; c < cols; c++) {
-                 if (matrix(r,c) == 0) {
-                      if (r < meas_count && c < tracks_count) {
-                           // Does the measurement fall within 3 std's of
-                           // the track?
-                           if (it_prev->is_within_region(new_people.points[meas_it], 3)) {
-                                // Found an assignment. Update the new measurement
-                                // with the track ID and age of older track. Add
-                                // to fused list
-                                //it->matched_track(*it_prev);
-                                it_prev->update(new_people.points[meas_it]);
-                                fused.push_back(*it_prev);
-                           } else {
-                                // TOO MUCH OF A JUMP IN POSITION
-                                // Probably a missed track or a new track
-                                it_prev->missed();
-                                fused.push_back(*it_prev);
-
-                                // And a new track
-                                fused.push_back(initPerson(new_people.points[meas_it], new_people_idx[meas_it]));
-                           }
-                      } else if (r >= meas_count) {
-                           it_prev->missed();
-                           fused.push_back(*it_prev);
-                      } else if (c >= tracks_count) {
-                           // Possible new track
-                           fused.push_back(initPerson(new_people.points[meas_it], new_people_idx[meas_it]));
-                      }
-                      break; // There is only one assignment per row
-                 }
-                 if (c < tracks_count-1) {
-                      it_prev++;
-                 }
-            }
-            if (r < meas_count-1) {
-                 meas_it++;
-            }
-       }
-   }
+//    void assign_munkres_people(const PointCloud& new_people,
+//                          std::vector<Person> &tracks,
+//                          std::vector<Person> &fused, std::vector<int>& new_people_idx)
+//    {
+//      // Create cost matrix between previous and current blob centroids
+//        int meas_count = new_people.points.size();
+//        int tracks_count = tracks.size();
+// 
+//        // Determine max of meas_count and tracks
+//        int rows = -1, cols = -1;
+//        if (meas_count >= tracks_count) {
+//             rows = cols = meas_count;
+//        } else {
+//             rows = cols = tracks_count;
+//        }
+// 
+//        Matrix<double> matrix(rows, cols);
+// 
+//        // New measurements are along the Y-axis (left hand side)
+//        // Previous tracks are along x-axis (top-side)
+//        int r = 0;
+//        for(const Point& p : new_people.points) {
+//             std::vector<Person>::iterator it_prev = tracks.begin();
+//             int c = 0;
+//             for (; it_prev != tracks.end(); it_prev++, c++) {
+//               // if (it_prev->isPerson() and not it_prev->isInFreeSpace()) {
+//               //   matrix(r,c) = max_cost;
+//               // } else {
+//                 double cov = it_prev->getMeasToTrackMatchingCov();
+//                 double mahalanobis_dist = std::sqrt((std::pow((p.x - it_prev->getPos().x), 2) +
+//                                                      std::pow((p.y - it_prev->getPos().y), 2)) / cov);
+// 
+//                 if (mahalanobis_dist < mahalanobis_dist_gate) {
+//                   matrix(r,c) = mahalanobis_dist;
+//                 } else {
+//                   matrix(r,c) = max_cost;
+//                 }
+//               // }
+//             }
+//             r++;
+//        }
+// 
+//        Munkres<double> m;
+//        m.solve(matrix);
+// 
+//        // Use the assignment to update the old tracks with new blob measurement
+//        int meas_it = 0;
+//        for(r = 0; r < rows; r++) {
+//             std::vector<Person>::iterator it_prev = tracks.begin();
+//             for (int c = 0; c < cols; c++) {
+//                  if (matrix(r,c) == 0) {
+//                       if (r < meas_count && c < tracks_count) {
+//                            // Does the measurement fall within 3 std's of
+//                            // the track?
+// 			    if (
+// 			if (it_prev->is_within_region(new_people.points[meas_it], 3)) {
+//                                 // Found an assignment. Update the new measurement
+//                                 // with the track ID and age of older track. Add
+//                                 // to fused list
+//                                 //it->matched_track(*it_prev);
+//                                 it_prev->update(new_people.points[meas_it]);
+//                                 fused.push_back(*it_prev);
+//                            } else {
+//                                 // TOO MUCH OF A JUMP IN POSITION
+//                                 // Probably a missed track or a new track
+//                                 it_prev->missed();
+//                                 fused.push_back(*it_prev);
+// 
+//                                 // And a new track
+//                                 fused.push_back(initPerson(new_people.points[meas_it], new_people_idx[meas_it]));
+//                            }
+//                       } else if (r >= meas_count) {
+//                            it_prev->missed();
+//                            fused.push_back(*it_prev);
+//                       } else if (c >= tracks_count) {
+//                            // Possible new track
+//                            fused.push_back(initPerson(new_people.points[meas_it], new_people_idx[meas_it]));
+//                       }
+//                       break; // There is only one assignment per row
+//                  }
+//                  if (c < tracks_count-1) {
+//                       it_prev++;
+//                  }
+//             }
+//             if (r < meas_count-1) {
+//                  meas_it++;
+//             }
+//        }
+//    }
 
    void gnn_munkres(PointCloud& cluster_centroids)
    {
@@ -2145,92 +2154,105 @@ public:
       legs = fused;
    }
 
-   void assign_munkres(const PointCloud& meas,
-                         std::vector<Leg> &tracks,
-                         std::vector<Leg> &fused)
-   {
-       // Create cost matrix between previous and current blob centroids
-       int meas_count = meas.points.size();
-       int tracks_count = tracks.size();
+    void assign_munkres(const PointCloud& meas,
+		      std::vector<Leg> &tracks,
+		      std::vector<Leg> &fused)
+    {
+      // Create cost matrix between previous and current blob centroids
+      int meas_count = meas.points.size();
+      int tracks_count = tracks.size();
 
-       // Determine max of meas_count and tracks
-       int rows = -1, cols = -1;
-       if (meas_count >= tracks_count) {
-            rows = cols = meas_count;
-       } else {
-            rows = cols = tracks_count;
-       }
+      // Determine max of meas_count and tracks
+      int rows = -1, cols = -1;
+      if (meas_count >= tracks_count) {
+	  rows = cols = meas_count;
+      } else {
+	  rows = cols = tracks_count;
+      }
 
-       Matrix<double> matrix(rows, cols);
+      Matrix<double> matrix(rows, cols);
 
-       // New measurements are along the Y-axis (left hand side)
-       // Previous tracks are along x-axis (top-side)
-       int r = 0;
-       for(const Point& p : meas.points) {
-            std::vector<Leg>::iterator it_prev = tracks.begin();
-            int c = 0;
-            for (; it_prev != tracks.end(); it_prev++, c++) {
-              // if (it_prev->isPerson() and not it_prev->isInFreeSpace()) {
-              //   matrix(r,c) = max_cost;
-              // } else {
-                double cov = it_prev->getMeasToTrackMatchingCov();
-                double mahalanobis_dist = std::sqrt((std::pow((p.x - it_prev->getPos().x), 2) +
-                                                     std::pow((p.y - it_prev->getPos().y), 2)) / cov);
-                if (mahalanobis_dist < mahalanobis_dist_gate) {
-                  matrix(r,c) = mahalanobis_dist;
-                } else {
-                  matrix(r,c) = max_cost;
-                }
-              // }
-            }
-            r++;
-       }
+      // New measurements are along the Y-axis (left hand side)
+      // Previous tracks are along x-axis (top-side)
+      int r = 0;
+      for(const Point& p : meas.points) {
+	  std::vector<Leg>::iterator it_prev = tracks.begin();
+	  int c = 0;
+	  for (; it_prev != tracks.end(); it_prev++, c++) {
+	    // if (it_prev->isPerson() and not it_prev->isInFreeSpace()) {
+	    //   matrix(r,c) = max_cost;
+	    // } else {
+	      double cov = it_prev->getMeasToTrackMatchingCov();
+	      double mahalanobis_dist = std::sqrt((std::pow((p.x - it_prev->getPos().x), 2) +
+						    std::pow((p.y - it_prev->getPos().y), 2)) / cov);
+	      double dist = distanceBtwTwoPoints(p, it_prev->getPos());
+	      if (dist <= 0.02)
+	      {
+		matrix(r, c) = 0;
+	      } else if (mahalanobis_dist < mahalanobis_dist_gate && dist < max_dist_btw_legs) {
+		matrix(r, c) = mahalanobis_dist;
+	      } else {
+		matrix(r, c) = max_cost;
+	      }
+	    // }
+	  }
+	  r++;
+      }
 
-       Munkres<double> m;
-       m.solve(matrix);
+      Munkres<double> m;
+      m.solve(matrix);
 
-       // Use the assignment to update the old tracks with new blob measurement
-       int meas_it = 0;
-       for(r = 0; r < rows; r++) {
-            std::vector<Leg>::iterator it_prev = tracks.begin();
-            for (int c = 0; c < cols; c++) {
-                 if (matrix(r,c) == 0) {
-                      if (r < meas_count && c < tracks_count) {
-                           // Does the measurement fall within 3 std's of
-                           // the track?
-                           if (it_prev->is_within_region(meas.points[meas_it],3)) {
-                                // Found an assignment. Update the new measurement
-                                // with the track ID and age of older track. Add
-                                // to fused list
-                                //it->matched_track(*it_prev);
-                                it_prev->update(meas.points[meas_it]);
-                                fused.push_back(*it_prev);
-                           } else {
-                                // TOO MUCH OF A JUMP IN POSITION
-                                // Probably a missed track or a new track
-                                it_prev->missed();
-                                fused.push_back(*it_prev);
+      // Use the assignment to update the old tracks with new blob measurement
+      int meas_it = 0;
+      for(r = 0; r < rows; r++) {
+	std::vector<Leg>::iterator it_prev = tracks.begin();
+	for (int c = 0; c < cols; c++) {
+	    if (matrix(r,c) == 0) {
+		if (r < meas_count && c < tracks_count) {
+		      // Does the measurement fall within 3 std's of
+		      // the track?
+			    
+		  double cov = it_prev->getMeasToTrackMatchingCov();
+		  double mahalanobis_dist = std::sqrt((std::pow((
+		    meas.points[meas_it].x - it_prev->getPos().x), 2) +
+		    std::pow((meas.points[meas_it].y - it_prev->getPos().y), 2)) / cov);
+		  double dist = distanceBtwTwoPoints(meas.points[meas_it], it_prev->getPos());
+    // 			   if (it_prev->is_within_region(meas.points[meas_it],3)) {
+		  if (mahalanobis_dist < mahalanobis_dist_gate &&
+		    dist < max_dist_btw_legs 
+		  ) {
+		      // Found an assignment. Update the new measurement
+		      // with the track ID and age of older track. Add
+		      // to fused list
+		      //it->matched_track(*it_prev);
+		      it_prev->update(meas.points[meas_it]);
+		      fused.push_back(*it_prev);
+		  } else {
+		      // TOO MUCH OF A JUMP IN POSITION
+		      // Probably a missed track or a new track
+		      it_prev->missed();
+		      fused.push_back(*it_prev);
 
-                                // And a new track
-                                fused.push_back(initLeg(meas.points[meas_it]));
-                           }
-                      } else if (r >= meas_count) {
-                           it_prev->missed();
-                           fused.push_back(*it_prev);
-                      } else if (c >= tracks_count) {
-                           // Possible new track
-                           fused.push_back(initLeg(meas.points[meas_it]));
-                      }
-                      break; // There is only one assignment per row
-                 }
-                 if (c < tracks_count-1) {
-                      it_prev++;
-                 }
-            }
-            if (r < meas_count-1) {
-                 meas_it++;
-            }
-       }
+		      // And a new track
+		      fused.push_back(initLeg(meas.points[meas_it]));
+		  }
+		} else if (r >= meas_count) {
+		      it_prev->missed();
+		      fused.push_back(*it_prev);
+		} else if (c >= tracks_count) {
+		      // Possible new track
+		      fused.push_back(initLeg(meas.points[meas_it]));
+		}
+		break; // There is only one assignment per row
+	  }
+	  if (c < tracks_count-1) {
+	      it_prev++;
+	  }
+	}
+	if (r < meas_count-1) {
+	      meas_it++;
+	}
+      }
   }
 
   unsigned int getNextLegId()
@@ -2465,15 +2487,15 @@ public:
     if (!clustering(filteredCloudXYZ, cluster_centroids)) { predictLegs(); return; }
 
 
-//     ROS_WARN("vor: ");
-//     printLegsInfo();
+    ROS_WARN("\nvor: \n");
+    printLegsInfo();
     if (isOnePersonToTrack) {
       matchLegCandidates(cluster_centroids);
     } else {
       gnn_munkres(cluster_centroids);
     }
-//     ROS_WARN("nach: ");
-//     printLegsInfo();
+    ROS_WARN("\nnach: \n");
+    printLegsInfo();
     visLegs();
 //     checkPeopleId();
     PointCloud new_people;

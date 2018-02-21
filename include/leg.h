@@ -95,6 +95,8 @@ public:
     Eigen::VectorXd diff = in - state;
     Eigen::MatrixXd dist_mat = diff.transpose() * B.inverse() * diff;
     double dist = dist_mat(0,0);
+    ROS_INFO("\nis_within_region state (%f, %f) and Point (%f, %f) and dist: %f", 
+	     pos.x, pos.y, p.x, p.y, dist);
     if (dist <= std) {
          return true;
     } else {
@@ -106,6 +108,11 @@ public:
   {
     occluded_age++;
     observations = 0;
+  }
+  
+  int getOccludedAge()
+  {
+    return occluded_age;
   }
 
   double getMeasToTrackMatchingCov()
