@@ -1,23 +1,62 @@
-scan_topic: /base_laser_rear/scan
+
+#scan_topic: /base_laser_rear/scan
+scan_topic: /scan_unified
 transform_link: base_link
-x_lower_limit: -2.1
+
+
+
+isOnePersonToTrack: true
+
+x_lower_limit: -1.9
 x_upper_limit: -0.2
-y_lower_limit: -0.9
-y_upper_limit: 0.9
+y_lower_limit: -0.8
+y_upper_limit: 0.8
+
 leg_radius: 0.1
-min_observations: 4
-min_predictions: 7
+min_observations: 3
+min_predictions: 5
 max_dist_btw_legs: 0.8
-z_coordinate: 0.178
+z_coordinate: 0.0
 vel_stance_threshold: 0.47
 vel_swing_threshold: 0.93
 state_dimensions: 6
-clusterTolerance: 0.07
+clusterTolerance: 0.09
 minClusterSize: 3
 maxClusterSize: 100
-isOnePersonToTrack: true
 max_nn_gating_distance: 1.0
-occluded_dead_age: 10
+occluded_dead_age: 5
 variance_observation: 0.25
 min_dist_travelled: 0.25
+max_cov: 0.81
 #history_size: 5
+
+
+
+
+
+
+
+
+#scan_topic: /base_laser_rear/scan
+#transform_link: base_link
+#x_lower_limit: -2.1
+#x_upper_limit: -0.2
+#y_lower_limit: -0.9
+#y_upper_limit: 0.9
+#leg_radius: 0.1
+#min_observations: 4
+#min_predictions: 7
+#max_dist_btw_legs: 0.8
+#z_coordinate: 0.178
+#vel_stance_threshold: 0.47
+#vel_swing_threshold: 0.93
+#state_dimensions: 6
+#clusterTolerance: 0.07
+#minClusterSize: 3
+#maxClusterSize: 100
+#isOnePersonToTrack: true
+#max_nn_gating_distance: 1.0
+#occluded_dead_age: 10
+#variance_observation: 0.25
+#min_dist_travelled: 0.25
+##history_size: 5

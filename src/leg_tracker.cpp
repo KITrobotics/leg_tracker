@@ -87,6 +87,10 @@ private:
   ros::Publisher legs_and_vel_direction_publisher;
   ros::Publisher tracking_area_pub;
   ros::Publisher people_pub;
+  
+  ros::Publisher marker_pub;
+  ros::Publisher cov_marker_pub;
+  
 
   std::string transform_link;
   std::string scan_topic;
@@ -124,6 +128,7 @@ private:
   int legs_marker_next_id;
   int people_marker_next_id;
   int next_leg_id;
+  int cov_ellipse_id;
 
 //   double max_nn_gating_distance;
   double max_cov;
@@ -165,7 +170,8 @@ public:
   {
     std::srand(1);
 
-    nh_.param("scan_topic", scan_topic, std::string("/base_laser_rear/scan"));
+//     nh_.param("scan_topic", scan_topic, std::string("/base_laser_rear/scan"));
+    nh_.param("scan_topic", scan_topic, std::string("/scan_unified"));
     nh_.param("transform_link", transform_link, std::string("base_link"));
     nh_.param("x_lower_limit", x_lower_limit, 0.0);
     nh_.param("x_upper_limit", x_upper_limit, 0.5);
@@ -190,7 +196,8 @@ public:
     nh_.param("max_cov", max_cov, 0.81);
 
 
-    legs_gathered = id_counter = legs_marker_next_id = next_leg_id = people_marker_next_id = 0;
+    legs_gathered = id_counter = legs_marker_next_id = next_leg_id = people_marker_next_id = 
+	cov_ellipse_id = 0;
 
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 1, &LegDetector::processLaserScan, this);
     sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 300);
@@ -201,6 +208,8 @@ public:
     legs_and_vel_direction_publisher = nh_.advertise<visualization_msgs::MarkerArray>("legs_and_vel_direction", 300);
     tracking_area_pub = nh_.advertise<visualization_msgs::Marker>("tracking_area", 300);
     people_pub = nh_.advertise<visualization_msgs::MarkerArray>("people", 300);
+    marker_pub = nh_.advertise<visualization_msgs::Marker>("line_strip", 10);
+    cov_marker_pub = nh_.advertise<visualization_msgs::MarkerArray>("cov_ellipses", 10);
 //
   }
 
@@ -342,7 +351,7 @@ public:
 //   }
 
 
-  void pubCovarianceAsEllipse(const double meanX, const double meanY, const Eigen::MatrixXd& S)
+  visualization_msgs::Marker getCovarianceEllipse(int id, const double meanX, const double meanY, const Eigen::MatrixXd& S)
   {
 
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(S);
@@ -351,10 +360,10 @@ public:
     Eigen::VectorXd e1 = solver.eigenvectors().col(0);
     Eigen::VectorXd e2 = solver.eigenvectors().col(1);
 
-    double scale95 = sqrt(5.991);
-    double R1 = scale95 * sqrt(l1);
-    double R2 = scale95 * sqrt(l2);
-    double tilt = atan2(e2.y(), e2.x());
+    double scale95 = std::sqrt(5.991);
+    double R1 = scale95 * std::sqrt(l1);
+    double R2 = scale95 * std::sqrt(l2);
+    double tilt = std::atan2(e2.y(), e2.x());
 
 
     Eigen::Quaterniond q;
@@ -364,10 +373,11 @@ public:
     double orientation_y = q.y();
     double orientation_z = q.z();
 
-    ROS_INFO("meanX: %f, meanY: %f, scale: %f, R1: %f, R2: %f, angle: %f",
-	     meanX, meanY, scale95, R1, R2, tilt);
-
-    //pub_oval(meanX, meanY, R1, R2, orientation_x, orientation_y, orientation_z, orientation_w, -2);
+//     ROS_INFO("meanX: %f, meanY: %f, scale: %f, R1: %f, R2: %f, angle: %f",
+// 	     meanX, meanY, scale95, R1, R2, tilt);
+    
+    return getOvalMarker(id, meanX, meanY, orientation_x, orientation_y, orientation_z,
+      orientation_w, R1, R2, 0.0, 0.0, 1.0);
   }
 
 
@@ -438,7 +448,7 @@ public:
 
     // build the filter
     outrem.setInputCloud(pass_through_filtered_y.makeShared());
-    outrem.setRadiusSearch(0.02);
+    outrem.setRadiusSearch(clusterTolerance);
     outrem.setMinNeighborsInRadius (2);
     // apply filter
     outrem.filter (out);
@@ -755,11 +765,12 @@ public:
     }
     cullDeadTracks(legs);
 
-    for (Point& p : cluster_centroids.points)
-    {
-      legs.push_back(initLeg(p));
+    if (legs.size() < 2) {
+      for (Point& p : cluster_centroids.points)
+      {
+	legs.push_back(initLeg(p));
+      }
     }
-
   }
 
       /*
@@ -1206,45 +1217,75 @@ public:
   }
 
 
-  void calculateAndPubOval(double x1, double y1, double x2, double y2, int id)
+//   void calculateAndPubOval(double x1, double y1, double x2, double y2, int id)
+//   {
+// 	    double x = (x1 + x2) / 2;
+// 	    double y = (y1 + y2) / 2;
+// 	    //double dist = std::sqrt(std::pow(x1 - x2, 2) + std::pow(y1 - y2, 2));
+// 	    double dist = distanceBtwTwoPoints(x1, y1, x2, y2);
+// 	    double scale_x = dist + 5 * leg_radius;
+// 	    double scale_y = 5 * leg_radius;
+// // 	    ROS_INFO("x1 - x2: %f", std::abs(x1 - x2));
+// 
+// 	    double norm_1 = std::sqrt(std::pow(x1, 2) + std::pow(y1, 2));
+// 	    double norm_2 = std::sqrt(std::pow(x2, 2) + std::pow(y2, 2));
+// 	    double temp = (x1 * x2 + y1 * y2) / (norm_1 * norm_2);
+// 
+// 
+// 	    double diff_x = x1 - x2;
+// // 	    if (x1 > x2) { diff_x = x2 - x1; }
+// 	    double diff_y = y1 - y2;
+// // 	    ROS_INFO("angle_x: %f, angle_y: %f", diff_x, diff_y);
+// 
+// 	    double angle = std::atan2( diff_y, diff_x );
+// // 	    ROS_WARN("diff_y: %f, diff_x : %f, angle: %f", diff_y, diff_x, angle);
+// // 	    double angle = std::acos(temp);
+// 
+// 
+// 	    Eigen::Quaterniond q;
+// 	    q = Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ());
+// 	    double orientation_w = q.w();
+// 	    double orientation_x = q.x();
+// 	    double orientation_y = q.y();
+// 	    double orientation_z = q.z();
+// 
+// 	    /*
+// 	    ROS_INFO("Oval theta: %f, x: %f, y: %f, s_x: %f, s_y: %f, o_x: %f, o_y: %f, o_z: %f, o_w: %f, id: %d",
+// 	      angle, x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);*/
+// 	    pub_oval(x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
+//   }
+  
+  visualization_msgs::Marker getOvalMarker(int id, double x, double y, 
+      double orientation_x, double orientation_y, double orientation_z, double orientation_w,
+      double scale_x, double scale_y, double r, double g, double b)
   {
-	    double x = (x1 + x2) / 2;
-	    double y = (y1 + y2) / 2;
-	    //double dist = std::sqrt(std::pow(x1 - x2, 2) + std::pow(y1 - y2, 2));
-      double dist = distanceBtwTwoPoints(x1, y1, x2, y2);
-	    double scale_x = dist + 5 * leg_radius;
-	    double scale_y = 5 * leg_radius;
-// 	    ROS_INFO("x1 - x2: %f", std::abs(x1 - x2));
-
-	    double norm_1 = std::sqrt(std::pow(x1, 2) + std::pow(y1, 2));
-	    double norm_2 = std::sqrt(std::pow(x2, 2) + std::pow(y2, 2));
-	    double temp = (x1 * x2 + y1 * y2) / (norm_1 * norm_2);
-
-
-	    double diff_x = x1 - x2;
-// 	    if (x1 > x2) { diff_x = x2 - x1; }
-	    double diff_y = y1 - y2;
-// 	    ROS_INFO("angle_x: %f, angle_y: %f", diff_x, diff_y);
-
-	    double angle = std::atan2( diff_y, diff_x );
-// 	    ROS_WARN("diff_y: %f, diff_x : %f, angle: %f", diff_y, diff_x, angle);
-// 	    double angle = std::acos(temp);
-
-
-	    Eigen::Quaterniond q;
-	    q = Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ());
-	    double orientation_w = q.w();
-	    double orientation_x = q.x();
-	    double orientation_y = q.y();
-	    double orientation_z = q.z();
-
-	    /*
-	    ROS_INFO("Oval theta: %f, x: %f, y: %f, s_x: %f, s_y: %f, o_x: %f, o_y: %f, o_z: %f, o_w: %f, id: %d",
-	      angle, x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);*/
-	    pub_oval(x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = transform_link;
+    marker.header.stamp = ros::Time();
+    marker.ns = nh_.getNamespace();
+    marker.id = id;
+    marker.type = visualization_msgs::Marker::CYLINDER;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.position.x = x;
+    marker.pose.position.y = y;
+    marker.pose.position.z = z_coordinate;
+    marker.pose.orientation.x = orientation_x;
+    marker.pose.orientation.y = orientation_y;
+    marker.pose.orientation.z = orientation_z;
+    marker.pose.orientation.w = orientation_w;
+    marker.scale.x = scale_x;
+    marker.scale.y = scale_y;
+//     marker.scale.z = 0;
+    marker.color.a = 1.0; // Don't forget to set the alpha!
+    marker.color.r = r;
+    marker.color.g = g;
+    marker.color.b = b;
+    //only if using a MESH_RESOURCE marker type:
+//     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
+    return marker;
   }
 
-  visualization_msgs::Marker getOvalMarker(double x1, double y1, double x2, double y2, int id)
+  visualization_msgs::Marker getOvalMarkerForTwoPoints(double x1, double y1, double x2, double y2, int id)
   {
     double x = (x1 + x2) / 2;
     double y = (y1 + y2) / 2;
@@ -1278,35 +1319,8 @@ public:
     /*
     ROS_INFO("Oval theta: %f, x: %f, y: %f, s_x: %f, s_y: %f, o_x: %f, o_y: %f, o_z: %f, o_w: %f, id: %d",
       angle, x, y, scale_x, scale_y, orientation_x, orientation_y, orientation_z, orientation_w, id);*/
-    visualization_msgs::Marker marker;
-    marker.header.frame_id = transform_link;
-    marker.header.stamp = ros::Time();
-    marker.ns = nh_.getNamespace();
-    if (id == -2) { marker.id = 0; }
-    marker.id = id;
-    marker.type = visualization_msgs::Marker::CYLINDER;
-    marker.action = visualization_msgs::Marker::ADD;
-    marker.pose.position.x = x;
-    marker.pose.position.y = y;
-    marker.pose.position.z = z_coordinate;
-    marker.pose.orientation.x = orientation_x;
-    marker.pose.orientation.y = orientation_y;
-    marker.pose.orientation.z = orientation_z;
-    marker.pose.orientation.w = orientation_w;
-    marker.scale.x = scale_x;
-    marker.scale.y = scale_y;
-//     marker.scale.z = 0;
-    marker.color.a = 1.0; // Don't forget to set the alpha!
-//     if (id == 0)
-//       marker.color.r = 1.0;
-//     if (id == 2)
-//       marker.color.g = 1.0;
-    if (id == -2) { marker.color.b = 1.0; }
-//     if (id == 1)
-//       marker.color.b = 1.0;
-    //only if using a MESH_RESOURCE marker type:
-//     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
-    return marker;
+    return getOvalMarker(id, x, y, orientation_x, orientation_y, orientation_z, orientation_w,
+      scale_x, scale_y, 0.0, 0.0, 0.0);
   }
 
   void vis_persons()
@@ -1353,7 +1367,7 @@ public:
 		{
 			if (l.getPeopleId() == id)
 			{
-			  ma_people.markers.push_back(getOvalMarker(
+			  ma_people.markers.push_back(getOvalMarkerForTwoPoints(
 			    legs[i].getPos().x,
 			    legs[i].getPos().y,
 			    l.getPos().x, 
@@ -1379,7 +1393,7 @@ public:
 	  {
 	    if (legs[j].getPeopleId() == id)
 	    {
-	      ma_people.markers.push_back(getOvalMarker(legs[i].getPos().x,
+	      ma_people.markers.push_back(getOvalMarkerForTwoPoints(legs[i].getPos().x,
 		  legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, getPeopleMarkerNextId()));
 	      break;
 
@@ -1448,9 +1462,78 @@ public:
 //       predictions.points.push_back(l.computePrediction());
 //     }
   }
+  
+  
+  void pub_cloud_points_as_line(const PointCloud& cloud) 
+  {
+    visualization_msgs::Marker points, line_strip, line_list;
+    points.header.frame_id = line_strip.header.frame_id = line_list.header.frame_id = transform_link;
+    points.header.stamp = line_strip.header.stamp = line_list.header.stamp = ros::Time::now();
+    points.ns = line_strip.ns = line_list.ns = nh_.getNamespace();
+    points.action = line_strip.action = line_list.action = visualization_msgs::Marker::ADD;
+    points.pose.orientation.w = line_strip.pose.orientation.w = line_list.pose.orientation.w = 1.0;
+
+    points.id = 0;
+    line_strip.id = 1;
+    line_list.id = 2;
+
+    points.type = visualization_msgs::Marker::POINTS;
+    line_strip.type = visualization_msgs::Marker::LINE_STRIP;
+    line_list.type = visualization_msgs::Marker::LINE_LIST;
+
+    points.scale.x = 0.2;
+    points.scale.y = 0.2;
+    
+    
+    // LINE_STRIP/LINE_LIST markers use only the x component of scale, for the line width
+    line_strip.scale.x = 0.1;
+    line_list.scale.x = 0.1;
+// %EndTag(SCALE)%
+
+// %Tag(COLOR)%
+    // Points are green
+    points.color.g = 1.0f;
+    points.color.a = 1.0;
+
+    // Line strip is blue
+    line_strip.color.b = 1.0;
+    line_strip.color.a = 1.0;
+
+    // Line list is red
+    line_list.color.r = 1.0;
+    line_list.color.a = 1.0;
+// %EndTag(COLOR)%
+
+// %Tag(HELIX)%
+    // Create the vertices for the points and lines
+    for (Point cloud_p : cloud.points)
+    {
+      geometry_msgs::Point p;
+      p.x = cloud_p.x;
+      p.y = cloud_p.y;
+      p.z = cloud_p.z;
+
+      points.points.push_back(p);
+      line_strip.points.push_back(p);
+
+      // The line list needs two points for each line
+      line_list.points.push_back(p);
+      p.z += 1.0;
+      line_list.points.push_back(p);
+    }
+// %EndTag(HELIX)%
+
+    marker_pub.publish(points);
+    marker_pub.publish(line_strip);
+    marker_pub.publish(line_list);
+    
+    
+  }
 
   bool clustering(const PointCloud& cloud, PointCloud& cluster_centroids)
   {
+    pcl_cloud_publisher.publish(cloud);
+//     pub_cloud_points_as_line(cloud);
 
     if (cloud.points.size() < minClusterSize) { ROS_DEBUG("Clustering: Too small number of points!"); return false; }
 
@@ -1478,9 +1561,10 @@ public:
     for (Leg& l : legs) 
     {
 //       if (calculateNorm(l.getVel()) < 0.4)
-//       {
+      if (l.getPeopleId() != -1)
+      {
 	leg_positions.points.push_back(l.getPos());
-//       }
+      }
     }
     pcl::KdTreeFLANN<Point> kdtree_clusters, kdtree_legs;
     
@@ -1530,9 +1614,7 @@ public:
 	}
       } else {
 	cluster_centroids.points.push_back(p);
-	return true;
       }
-      
     }
     
     
@@ -1543,6 +1625,9 @@ public:
     
     ROS_WARN("\nleg_positions\n");
     printCloudPoints(leg_positions);
+    
+    ROS_WARN("\ncluster_centroids\n");
+    printCloudPoints(cluster_centroids);
     
     if (cluster_centroids_temp.points.size() == 0) { return true; }
     
@@ -1568,9 +1653,9 @@ public:
       std::vector<float> pointsSquaredDist(K);
       
       
-      // radius search
-//       int count_clusters = kdtree_clusters.radiusSearch(cluster, radius, pointIdxRadius_clusters, 
-// 							pointsSquaredDistRadius_clusters);
+//       radius search
+      int count_clusters = kdtree_clusters.radiusSearch(cluster, radius, pointIdxRadius_clusters, 
+							pointsSquaredDistRadius_clusters);
       
 //       int count_legs = kdtree_legs.radiusSearch(cluster, radius, pointIdxRadius_legs, 
 // 						pointsSquaredDistRadius_legs);
@@ -1646,7 +1731,7 @@ public:
 	  if (dot_product < 0) { fst.points.push_back(p); }
 	  else { snd.points.push_back(p); }
 	}
-	ROS_WARN("fst.points.size: %d, snd.points.size: %d", fst.points.size(), snd.points.size());
+	ROS_WARN("fst.points.size: %d, snd.points.size: %d", (int) fst.points.size(), (int) snd.points.size());
 	
 	if (fst.points.size() < minClusterSize || snd.points.size() < minClusterSize) 
 	{
@@ -1706,7 +1791,7 @@ public:
 	cluster_centroids.points.push_back(cluster);
       }
     }
-    ROS_WARN("\ncluster_centroids\n");
+    ROS_WARN("\ncluster_centroids at end\n");
     printCloudPoints(cluster_centroids);
 //     pcl_cloud_publisher.publish(cluster_centroids);
     return true;
@@ -2104,7 +2189,7 @@ public:
    {
      int i = 0;
      while(i != v.size()) {
-        if (v[i].is_dead()/* || v[i].getMeasToTrackMatchingCov() > max_cov*/) {
+        if (v[i].is_dead() || v[i].getMeasToTrackMatchingCov() > max_cov) {
 	    if (v[i].hasPair()) { resetHasPair(v, i); removed_legs.push_back(v[i]); }
 	    else if (v[i].getPeopleId() != -1) { removed_legs.push_back(v[i]); }
 	    removeLegFromVector(v, i);
@@ -2233,13 +2318,36 @@ public:
 //        }
 //    }
 
-   void gnn_munkres(PointCloud& cluster_centroids)
-   {
+
+    
+    int getNextCovEllipseId()
+    {
+      return cov_ellipse_id++;
+    }
+
+    void gnn_munkres(PointCloud& cluster_centroids)
+    {
+      
       // Filter model predictions
-      for(std::vector<Leg>::iterator it = legs.begin();
-          it != legs.end(); it++) {
-           it->predict();
+      for (int i = 0; i < legs.size(); i++)
+      {	
+	if (legs[i].hasPair()) {
+	  double vel = calculateNorm(legs[i].getVel());
+	  if (vel > 0.2) {
+	    for (int j = i + 1; j < legs.size(); j++) {
+	      if (legs[i].getPeopleId() == legs[j].getPeopleId()) {
+		double dist = distanceBtwTwoPoints(legs[i].getPos(), legs[j].getPos());
+		if (max_dist_btw_legs - dist < 0.1) {
+		  legs[i].resetCovAndState();
+		}
+		break;
+	      }
+	    }
+	  }
+	}
+	legs[i].predict();
       }
+      
       std::vector<Leg> fused;
 
       assign_munkres(cluster_centroids, legs, fused);
@@ -2247,7 +2355,7 @@ public:
       cullDeadTracks(fused);
 
       legs = fused;
-   }
+    }
 
     void assign_munkres(const PointCloud& meas,
 		      std::vector<Leg> &tracks,
@@ -2266,6 +2374,12 @@ public:
       }
 
       Matrix<double> matrix(rows, cols);
+      
+      visualization_msgs::MarkerArray cov_ellipse_ma;
+      if (cov_ellipse_id != 0) {
+	removeOldMarkers(cov_ellipse_id, cov_marker_pub);
+	cov_ellipse_id = 0;
+      }
 
       // New measurements are along the Y-axis (left hand side)
       // Previous tracks are along x-axis (top-side)
@@ -2277,25 +2391,66 @@ public:
 	    // if (it_prev->isPerson() and not it_prev->isInFreeSpace()) {
 	    //   matrix(r,c) = max_cost;
 	    // } else {
+	      Eigen::MatrixXd cov_matrix = it_prev->getMeasToTrackMatchingCovMatrix();
+	      std::cout << cov_matrix << std::endl;
 	      double cov = it_prev->getMeasToTrackMatchingCov();
+	      
+	      if (cov == 0) { ROS_ERROR("assign_munkres: cov = 0"); continue; }
 	      double mahalanobis_dist = std::sqrt((std::pow((p.x - it_prev->getPos().x), 2) +
 						    std::pow((p.y - it_prev->getPos().y), 2)) / cov);
 	      double dist = distanceBtwTwoPoints(p, it_prev->getPos());
-	      if (dist <= 0.02)
+	      
+	      cov_ellipse_ma.markers.push_back(getCovarianceEllipse(getNextCovEllipseId(), it_prev->getPos().x,
+		it_prev->getPos().y, cov_matrix));
+	      
+	      ROS_INFO("\n\nmahalanobis_dist:\n\n");
+	      ROS_INFO("Prev pos: (%f, %f)", it_prev->getPos().x, it_prev->getPos().y);
+	      ROS_INFO("Meas pos: (%f, %f)", p.x, p.y);
+	      ROS_INFO("cov: %f, maha: %f, dist: %f", cov, mahalanobis_dist, dist);
+	      
+	      double vel = calculateNorm(it_prev->getVel());
+	      
+	      if (dist <= 0.03)
 	      {
 		matrix(r, c) = 0;
-	      } else if (mahalanobis_dist < mahalanobis_dist_gate && dist < 0.5 * max_dist_btw_legs) {
+	      } 
+	      else if (mahalanobis_dist < mahalanobis_dist_gate && dist < 0.5 * max_dist_btw_legs) 
+	      {
 		matrix(r, c) = mahalanobis_dist;
-	      } else {
+	      } 
+	      else 
+	      {
 		matrix(r, c) = max_cost;
 	      }
 	    // }
 	  }
 	  r++;
       }
+      
+      cov_marker_pub.publish(cov_ellipse_ma);
+      
+      std::string s = "\n\nmatrix before:\n";
+      for (int i = 0; i < rows; i++) {
+	for (int j = 0; j < cols; j++) {
+	  s.append(std::to_string(matrix(i, j)));
+	  s.append("__");
+	}
+	s.append("\n");
+      }
+      ROS_INFO("%s", s.c_str());
 
       Munkres<double> m;
       m.solve(matrix);
+      
+      s = "\n\nmatrix after:\n";
+      for (int i = 0; i < rows; i++) {
+	for (int j = 0; j < cols; j++) {
+	  s.append(std::to_string(matrix(i, j)));
+	  s.append("__");
+	}
+	s.append("\n");
+      }
+      ROS_INFO("%s", s.c_str());
 
       // Use the assignment to update the old tracks with new blob measurement
       int meas_it = 0;
@@ -2314,8 +2469,8 @@ public:
 		  double dist = distanceBtwTwoPoints(meas.points[meas_it], it_prev->getPos());
     // 			   if (it_prev->is_within_region(meas.points[meas_it],3)) {
 		  if (mahalanobis_dist < mahalanobis_dist_gate &&
-		    dist < max_dist_btw_legs 
-		  ) {
+		    dist < 0.48 * max_dist_btw_legs) 
+		  {
 		      // Found an assignment. Update the new measurement
 		      // with the track ID and age of older track. Add
 		      // to fused list
@@ -2451,39 +2606,39 @@ public:
     tracking_area_pub.publish( marker );
   }
 
-  void pub_oval(double x, double y, double scale_x, double scale_y, double orientation_x,
-    double orientation_y, double orientation_z, double orientation_w, int id)
-  {
-    visualization_msgs::Marker marker;
-    marker.header.frame_id = transform_link;
-    marker.header.stamp = ros::Time();
-    marker.ns = nh_.getNamespace();
-    if (id == -2) { marker.id = 0; }
-    marker.id = id;
-    marker.type = visualization_msgs::Marker::CYLINDER;
-    marker.action = visualization_msgs::Marker::ADD;
-    marker.pose.position.x = x;
-    marker.pose.position.y = y;
-    marker.pose.position.z = z_coordinate;
-    marker.pose.orientation.x = orientation_x;
-    marker.pose.orientation.y = orientation_y;
-    marker.pose.orientation.z = orientation_z;
-    marker.pose.orientation.w = orientation_w;
-    marker.scale.x = scale_x;
-    marker.scale.y = scale_y;
-//     marker.scale.z = 0;
-    marker.color.a = 1.0; // Don't forget to set the alpha!
-//     if (id == 0)
-//       marker.color.r = 1.0;
-//     if (id == 2)
-//       marker.color.g = 1.0;
-    if (id == -2) { marker.color.b = 1.0; }
-//     if (id == 1)
-//       marker.color.b = 1.0;
-    //only if using a MESH_RESOURCE marker type:
-//     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
-    vis_pub.publish( marker );
-  }
+//   void pub_oval(double x, double y, double scale_x, double scale_y, double orientation_x,
+//     double orientation_y, double orientation_z, double orientation_w, int id)
+//   {
+//     visualization_msgs::Marker marker;
+//     marker.header.frame_id = transform_link;
+//     marker.header.stamp = ros::Time();
+//     marker.ns = nh_.getNamespace();
+//     if (id == -2) { marker.id = 0; }
+//     marker.id = id;
+//     marker.type = visualization_msgs::Marker::CYLINDER;
+//     marker.action = visualization_msgs::Marker::ADD;
+//     marker.pose.position.x = x;
+//     marker.pose.position.y = y;
+//     marker.pose.position.z = z_coordinate;
+//     marker.pose.orientation.x = orientation_x;
+//     marker.pose.orientation.y = orientation_y;
+//     marker.pose.orientation.z = orientation_z;
+//     marker.pose.orientation.w = orientation_w;
+//     marker.scale.x = scale_x;
+//     marker.scale.y = scale_y;
+// //     marker.scale.z = 0;
+//     marker.color.a = 1.0; // Don't forget to set the alpha!
+// //     if (id == 0)
+// //       marker.color.r = 1.0;
+// //     if (id == 2)
+// //       marker.color.g = 1.0;
+//     if (id == -2) { marker.color.b = 1.0; }
+// //     if (id == 1)
+// //       marker.color.b = 1.0;
+//     //only if using a MESH_RESOURCE marker type:
+// //     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
+//     vis_pub.publish( marker );
+//   }
 
 
   void pub_circle_with_radius(double x, double y, double radius)
@@ -2554,7 +2709,7 @@ public:
 
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
-//     pub_border_square();
+    pub_border_square();
 //     pub_line((x_upper_limit - x_lower_limit) / 2, y_lower_limit);
 //     pub_line((x_upper_limit - x_lower_limit) / 2, y_upper_limit);
 //     pub_line(x_lower_limit, (y_upper_limit - y_lower_limit) / 2);
@@ -2573,7 +2728,6 @@ public:
 
     PointCloud cloudXYZ, filteredCloudXYZ;
     pcl::fromPCLPointCloud2(*pcl_pc2, cloudXYZ);
-
     if (!filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { predictLegs(); return; }
 
     PointCloud cluster_centroids;

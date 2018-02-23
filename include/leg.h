@@ -43,6 +43,7 @@ private:
   double variance_observation;
   int state_dimensions;
   double distance_traveled;
+  Eigen::MatrixXd cov;
 
 public:
   Leg() = delete;
@@ -83,6 +84,11 @@ public:
   {
     return legId;
   }
+  
+  void resetCovAndState()
+  {
+    filter->resetCovAndState();
+  }
 
   bool is_within_region(const Point& p, double std)
   {
@@ -115,12 +121,14 @@ public:
     return occluded_age;
   }
 
+  Eigen::MatrixXd getMeasToTrackMatchingCovMatrix()
+  {
+    return cov;
+  }
+
   double getMeasToTrackMatchingCov()
   {
-    double result = 0.;
-    Eigen::MatrixXd cov;
-    if (!filter->getCovarianceMatrix(cov)) { ROS_ERROR("Leg.h: getCovarianceMatrix() has failed!"); return result; }
-    result = cov(0, 0);
+    double result = cov(0, 0);
     result += variance_observation;
     return result;
   }
@@ -144,6 +152,7 @@ public:
     vel.y = prediction[3];
     acc.x = prediction[4];
     acc.y = prediction[5];
+    filter->getCovarianceMatrix(cov);
   }
 
   void update(const Point& p)
@@ -163,6 +172,7 @@ public:
     vel.y = out[3];
     acc.x = out[4];
     acc.y = out[5];
+    filter->getCovarianceMatrix(cov);
     updateHistory(out);
     occluded_age = 0;
     if (observations < min_observations) { observations++; }
