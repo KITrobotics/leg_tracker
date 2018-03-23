@@ -44,13 +44,14 @@ private:
   int state_dimensions;
   double distance_traveled;
   Eigen::MatrixXd cov;
+  double min_dist_travelled;
 
 public:
   Leg() = delete;
 
   Leg(unsigned int legId, const Point& pos, int occluded_dead_age = 10,
     double variance_observation = 0.25, int min_observations = 4,
-    int state_dimensions = 6)
+    int state_dimensions = 6, double min_dist_travelled = 0.25)
   {
     this->legId = legId;
     occluded_age = 0;
@@ -59,6 +60,7 @@ public:
     this->variance_observation = variance_observation;
     this->min_observations = min_observations;
     this->state_dimensions = state_dimensions;
+    this->min_dist_travelled = min_dist_travelled;
     
     history.resize(min_observations);
     for (int i = 0; i < min_observations; i++) { history[i].resize(state_dimensions); }
@@ -154,6 +156,8 @@ public:
     acc.y = prediction[5];
     filter->getCovarianceMatrix(cov);
   }
+  
+  
 
   void update(const Point& p)
   {
@@ -161,11 +165,11 @@ public:
     in.push_back(p.x); in.push_back(p.y);
     filter->update(in, out);
     if (out.size() != state_dimensions) { ROS_ERROR("Leg.h: Update out vector size is too small!"); return; }
-//     if (observations > 0 && hasPair_ && dist_travelled < min_dist_travelled)
-//     {
-//       double delta_dist_travelled = std::sqrt(std::pow((pos.x - out[0]), 2) + std::pow((pos.y - out[1]), 2));
-//       if (delta_dist_travelled > 0.01) { distance_traveled += delta_dist_travelled; }
-//     }
+    if (distance_traveled <= min_dist_travelled)
+    {
+      double delta_dist_travelled = std::sqrt(std::pow((pos.x - out[0]), 2) + std::pow((pos.y - out[1]), 2));
+      if (delta_dist_travelled > 0.01) { distance_traveled += delta_dist_travelled; }
+    }
     pos.x = out[0];
     pos.y = out[1];
     vel.x = out[2];
@@ -211,9 +215,9 @@ public:
 	  return observations;
   }
 
-//   double getDistTravelled() {
-//     return dist_travelled;
-//   }
+  double getDistanceTravelled() {
+    return distance_traveled;
+  }
 
   void setPeopleId(int id)
   {
