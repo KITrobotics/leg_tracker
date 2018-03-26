@@ -33,7 +33,19 @@ find_package(catkin REQUIRED COMPONENTS
 #   trajectory_msgs
 #   urdf
 )
-find_package(Eigen3 REQUIRED)
+
+# find_package(Eigen3 REQUIRED)
+find_package(Eigen3)
+if(NOT EIGEN3_FOUND)
+  # Fallback to cmake_modules
+  find_package(cmake_modules REQUIRED)
+  find_package(Eigen REQUIRED)
+else()
+  set(Eigen_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIR})
+  set(Eigen_LIBRARIES ${EIGEN3_LIBRARIES}) 
+endif()
+
+
 find_package(OpenCV REQUIRED)
 
 find_package(Boost REQUIRED)

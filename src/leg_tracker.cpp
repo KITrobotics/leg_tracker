@@ -47,6 +47,8 @@
 #include <munkres.h>
 #include "nav_msgs/OccupancyGrid.h"
 #include <fstream>
+#include "geometry_msgs/PointStamped.h"
+
 
 
 
@@ -1708,15 +1710,32 @@ public:
     
       Point p; p.x = centroid(0); p.y = centroid(1);
       
+      bool isPointTransformed = false;
+      geometry_msgs::PointStamped point_in, point_out;
       
+      point_in.header = cloud.header;
+      point_in.point.x = p.x; 
+      point_in.point.y = p.y;
       
       if (got_map) {
-	double in_free_space = how_much_in_free_space(p.x, p.y);
-// 	ROS_WARN("in_free_space: %f", in_free_space);
-	if (in_free_space > in_free_space_threshold) 
+	try 
 	{
-	  continue;
-	} 
+	  tfBuffer.transform(point_in, point_out, local_map.header.frame_id);
+	  isPointTransformed = true;
+	}
+	catch (tf2::TransformException &ex) 
+	{
+	  ROS_WARN("Failure to transform point! %s\n", ex.what());
+	}
+	
+	if (isPointTransformed) {
+	  double in_free_space = how_much_in_free_space(point_out.point.x, point_out.point.y);
+  // 	ROS_WARN("in_free_space: %f", in_free_space);
+	  if (in_free_space > in_free_space_threshold) 
+	  {
+	    continue;
+	  } 
+	}
       }
       
       if (leg_positions.points.size() != 0) {
