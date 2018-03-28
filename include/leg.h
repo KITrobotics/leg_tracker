@@ -80,6 +80,7 @@ public:
 
     filter = new KalmanFilter();
     if (!filter->configure(in)) { ROS_ERROR("Leg.h: Configure of filter has failed!"); }
+    filter->getCovarianceMatrix(cov);
   }
 
   unsigned int getLegId()
@@ -127,10 +128,15 @@ public:
   {
     return cov;
   }
+  
+  double getCov() 
+  {
+    return cov(0, 0);
+  }
 
   double getMeasToTrackMatchingCov()
   {
-    double result = cov(0, 0);
+    double result = cov(0, 0); 
     result += variance_observation;
     return result;
   }

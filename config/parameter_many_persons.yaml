@@ -31,10 +31,16 @@ isOnePersonToTrack: false
 #y_upper_limit: 0.8
 
 #actual limits
-x_lower_limit: -2.5
-x_upper_limit: 2.5
-y_lower_limit: -2.5
-y_upper_limit: 2.5
+#x_lower_limit: -2.5
+#x_upper_limit: 2.5
+#y_lower_limit: -2.5
+#y_upper_limit: 2.5
+
+#extended limits
+x_lower_limit: -5.0
+x_upper_limit: 5.0
+y_lower_limit: -5.0
+y_upper_limit: 5.0
 
 
 
