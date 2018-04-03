@@ -2581,17 +2581,32 @@ public:
 // 	      double vel = calculateNorm(it_prev->getVel());
 // 	  ROS_INFO("a13");
 	      
-	      if (dist <= 0.03)
-	      {
-		matrix(r, c) = 0;
-	      } 
-	      else if (mahalanobis_dist < mahalanobis_dist_gate && dist < 0.5 * max_dist_btw_legs) 
-	      {
-		matrix(r, c) = mahalanobis_dist;
-	      } 
-	      else 
-	      {
-		matrix(r, c) = max_cost;
+	      if (isOnePersonToTrack) {
+		if (dist <= 0.03)
+		{
+		  matrix(r, c) = 0;
+		} 
+		else if (mahalanobis_dist < 0.4 * mahalanobis_dist_gate && dist < 0.35 * max_dist_btw_legs) 
+		{
+		  matrix(r, c) = mahalanobis_dist;
+		} 
+		else 
+		{
+		  matrix(r, c) = max_cost;
+		}
+	      } else {
+		if (dist <= 0.03)
+		{
+		  matrix(r, c) = 0;
+		} 
+		else if (mahalanobis_dist < mahalanobis_dist_gate && dist < 0.5 * max_dist_btw_legs) 
+		{
+		  matrix(r, c) = mahalanobis_dist;
+		} 
+		else 
+		{
+		  matrix(r, c) = max_cost;
+		}
 	      }
 // 	  ROS_INFO("a14");
 	    // }
@@ -2644,30 +2659,69 @@ public:
 		  double dist = distanceBtwTwoPoints(meas.points[meas_it], it_prev->getPos());
     // 			   if (it_prev->is_within_region(meas.points[meas_it],3)) {
 		  
-		  if (mahalanobis_dist < mahalanobis_dist_gate &&
-		    dist < 0.48 * max_dist_btw_legs) 
+		  if (isOnePersonToTrack) 
 		  {
-		      // Found an assignment. Update the new measurement
-		      // with the track ID and age of older track. Add
-		      // to fused list
-		      //it->matched_track(*it_prev);
-		      it_prev->update(meas.points[meas_it]);
-		      fused.push_back(*it_prev);
-		  } else {
-		      // TOO MUCH OF A JUMP IN POSITION
-		      // Probably a missed track or a new track
-		      it_prev->missed();
-		      fused.push_back(*it_prev);
+		    if (mahalanobis_dist < 0.4 * mahalanobis_dist_gate &&
+		    dist < 0.35 * max_dist_btw_legs) 
+		    {
+			// Found an assignment. Update the new measurement
+			// with the track ID and age of older track. Add
+			// to fused list
+			//it->matched_track(*it_prev);
+			it_prev->update(meas.points[meas_it]);
+			fused.push_back(*it_prev);
+		    } else {
+			// TOO MUCH OF A JUMP IN POSITION
+			// Probably a missed track or a new track
+			it_prev->missed();
+			fused.push_back(*it_prev);
 
-		      // And a new track
-		      fused.push_back(initLeg(meas.points[meas_it]));
+			// And a new track
+			//fused.push_back(initLeg(meas.points[meas_it]));
+		    }
+		  } 
+		  else 
+		  {
+		    if (mahalanobis_dist < mahalanobis_dist_gate &&
+		    dist < 0.48 * max_dist_btw_legs) 
+		    {
+			// Found an assignment. Update the new measurement
+			// with the track ID and age of older track. Add
+			// to fused list
+			//it->matched_track(*it_prev);
+			it_prev->update(meas.points[meas_it]);
+			fused.push_back(*it_prev);
+		    } else {
+			// TOO MUCH OF A JUMP IN POSITION
+			// Probably a missed track or a new track
+			it_prev->missed();
+			fused.push_back(*it_prev);
+
+			// And a new track
+			fused.push_back(initLeg(meas.points[meas_it]));
+		    }
 		  }
+		  
 		} else if (r >= meas_count) {
 		      it_prev->missed();
 		      fused.push_back(*it_prev);
 		} else if (c >= tracks_count) {
 		      // Possible new track
-		      fused.push_back(initLeg(meas.points[meas_it]));
+		  if (isOnePersonToTrack) 
+		  {
+// 		    bool isPersonFound = true;
+// 		    for (Leg& l : legs) {
+// 		      if (!l.hasPair()) 
+// 		      {
+// 			isPersonFound = false;
+// 			break;
+// 		      }
+// 		    }
+		  } 
+		  else 
+		  {
+		    fused.push_back(initLeg(meas.points[meas_it]));
+		  }
 		}
 		break; // There is only one assignment per row
 	  }
