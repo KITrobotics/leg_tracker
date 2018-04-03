@@ -86,7 +86,7 @@ class LegDetector
 {
 private:
   ros::Subscriber sub;
-  ros::Subscriber local_map_sub;
+  ros::Subscriber global_map_sub;
   laser_geometry::LaserProjection projector_;
   ros::Publisher sensor_msgs_point_cloud_publisher;
   ros::Publisher pcl_cloud_publisher;
@@ -102,7 +102,7 @@ private:
 
   std::string transform_link;
   std::string scan_topic;
-  std::string local_map_topic;
+  std::string global_map_topic;
   
   double x_lower_limit;
   double x_upper_limit;
@@ -145,7 +145,7 @@ private:
   double min_dist_travelled;
   double in_free_space_threshold;
   
-  nav_msgs::OccupancyGrid local_map;
+  nav_msgs::OccupancyGrid global_map;
   bool got_map;
 
   //mht
@@ -187,7 +187,7 @@ public:
 //     nh_.param("scan_topic", scan_topic, std::string("/base_laser_rear/scan"));
     nh_.param("scan_topic", scan_topic, std::string("/scan_unified"));
     nh_.param("transform_link", transform_link, std::string("base_link"));
-    nh_.param("local_map_topic", local_map_topic, std::string("/move_base/local_costmap/costmap"));
+    nh_.param("global_map_topic", global_map_topic, std::string("/move_base/global_costmap/costmap"));
     nh_.param("x_lower_limit", x_lower_limit, 0.0);
     nh_.param("x_upper_limit", x_upper_limit, 0.5);
     nh_.param("y_lower_limit", y_lower_limit, -0.5);
@@ -216,7 +216,7 @@ public:
     got_map = false;	
 
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 1, &LegDetector::processLaserScan, this);
-    local_map_sub = nh_.subscribe<nav_msgs::OccupancyGrid>(local_map_topic, 10, &LegDetector::localMapCallback, this);
+    global_map_sub = nh_.subscribe<nav_msgs::OccupancyGrid>(global_map_topic, 10, &LegDetector::globalMapCallback, this);
     sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 300);
     pcl_cloud_publisher = nh_.advertise<PointCloud> ("scan2pclCloud", 300);
     vis_pub = nh_.advertise<visualization_msgs::Marker>("leg_circles", 300);
@@ -230,60 +230,10 @@ public:
 //
   }
   
-  void localMapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg) 
+  void globalMapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg) 
   {
-//     std_msgs::Header header = msg->header;
-//     nav_msgs::MapMetaData info = msg->info;
-// //     ROS_INFO("Got map %d %d", info.width, info.height);
-//     nav_msgs::Map map(info.width, info.height);
-//     for (unsigned int x = 0; x < info.width; x++)
-//       for (unsigned int y = 0; y < info.height; y++)
-// 	map.Insert(Cell(x,y,info.width,msg->data[x+ info.width * y]));
-//     local_map = map.Grid();
-//     local_map.header = header;
-//     local_map.info = info;
-//     if (msg)
-//     {
-//       local_map.info = msg->info;
-//       local_map.data = msg->data;
-//       local_map.header = msg->header;
-//       if(!got_map) { got_map = true; }
-//       ROS_WARN("got map");
-//     }
-    local_map = *msg;
-    if(!got_map) { got_map = true;/* printGridToFile();*/ }
-    ROS_WARN("got map %s", local_map.header.frame_id.c_str());
-  }
-  
-  void printGridToFile() {
-    std::vector<std::vector<bool> > grid;
-    int rows = local_map.info.height;
-    int cols = local_map.info.width;
-    ROS_WARN("rows: %d, cols: %d", rows, cols);
-    grid.resize(rows);
-    for (int i = 0; i < rows; i++) {
-        grid[i].resize(cols);
-    }
-    int currCell = 0;
-    for (int i = 0; i < rows; i++)  {
-        for (int j = 0; j < cols; j++)      {
-            if (local_map.data[currCell] == 0) // unoccupied cell
-                grid[i][j] = false;
-            else
-                grid[i][j] = true; // occupied (100) or unknown cell (-1)
-            currCell++;
-        }
-    }
-    std::ofstream gridFile;
-    const char *path="/home/azanov/grid.txt";
-    gridFile.open(path);
-    for (int i = grid.size() - 1; i >= 0; i--) {        
-        for (int j = 0; j < grid[0].size(); j++) {
-        gridFile << (grid[i][j] ? "1" : "0");           
-        }
-        gridFile << std::endl;
-    }
-    gridFile.close();
+    global_map = *msg;
+    if(!got_map) { got_map = true; }
   }
 
   double getRandomNumberFrom0To1()
@@ -928,23 +878,21 @@ public:
   
   double how_much_in_free_space(double x, double y)
   {
-    // Determine the degree to which the position (x,y) is in freespace according to our local map
-//     if local_map == None
-//       return self.in_free_space_threshold*2
+    // Determine the degree to which the position (x,y) is in freespace according to our global map
     if (!got_map) {
       return in_free_space_threshold * 2;
     }
-    int map_x = int(std::round((x - local_map.info.origin.position.x)/local_map.info.resolution));
-    int map_y = int(std::round((y - local_map.info.origin.position.y)/local_map.info.resolution));
+    int map_x = int(std::round((x - global_map.info.origin.position.x)/global_map.info.resolution));
+    int map_y = int(std::round((y - global_map.info.origin.position.y)/global_map.info.resolution));
     
     double sum = 0;
     int kernel_size = 2;
     for (int i = map_x - kernel_size; i <= map_x + kernel_size; i++) {  
       for (int j = map_y - kernel_size; j <= map_y + kernel_size; j++) { 
-	  if (i + j * local_map.info.height < local_map.info.height * local_map.info.width) {
-	      sum += local_map.data[i + j * local_map.info.height];
+	  if (i + j * global_map.info.height < global_map.info.height * global_map.info.width) {
+	      sum += global_map.data[i + j * global_map.info.height];
 	  } else {  
-	      // We went off the map! position must be really close to an edge of local_map
+	      // We went off the map! position must be really close to an edge of global_map
 	      return in_free_space_threshold * 2;
 	  }
       }
@@ -1720,8 +1668,8 @@ public:
 	
 	geometry_msgs::TransformStamped transformStamped;
 	try{
-// 	  tfBuffer.transform(point_in, point_out, local_map.header.frame_id);
-	  transformStamped = tfBuffer.lookupTransform(local_map.header.frame_id, point_in.header.frame_id, ros::Time(0));
+// 	  tfBuffer.transform(point_in, point_out, global_map.header.frame_id);
+	  transformStamped = tfBuffer.lookupTransform(global_map.header.frame_id, point_in.header.frame_id, ros::Time(0));
 	}
 	catch (tf2::TransformException &ex) {
 	  ROS_WARN("Failure to lookup the transform for a point! %s\n", ex.what());
