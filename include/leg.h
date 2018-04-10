@@ -137,7 +137,7 @@ public:
   double getMeasToTrackMatchingCov()
   {
     double result = cov(0, 0); 
-    result += variance_observation;
+//     result += variance_observation;
     return result;
   }
 

@@ -1,10 +1,10 @@
 isOnePersonToTrack: false
 
 # front_cutted.bag
-#x_lower_limit: -2.6
-#x_upper_limit: 1.0
-#y_lower_limit: -1.0
-#y_upper_limit: 2.8
+x_lower_limit: -2.6
+x_upper_limit: 1.0
+y_lower_limit: -1.0
+y_upper_limit: 2.8
 
 # four.bag
 #x_lower_limit: -2.2
@@ -37,10 +37,10 @@ isOnePersonToTrack: false
 #y_upper_limit: 2.5
 
 #extended limits
-x_lower_limit: -5.0
-x_upper_limit: 5.0
-y_lower_limit: -5.0
-y_upper_limit: 5.0
+#x_lower_limit: -5.0
+#x_upper_limit: 5.0
+#y_lower_limit: -5.0
+#y_upper_limit: 5.0
 
 
 

@@ -17,10 +17,15 @@ clusterTolerance: 0.07
 minClusterSize: 3
 maxClusterSize: 100
 max_nn_gating_distance: 1.0
-occluded_dead_age: 5
+occluded_dead_age: 10
 variance_observation: 0.25
 min_dist_travelled: 0.25
 max_cov: 0.81
 in_free_space_threshold: 0.06
+
+
+#with_map: true
+with_map: false
+
 
 #history_size: 5
