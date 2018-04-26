@@ -46,7 +46,7 @@ else()
 endif()
 
 
-find_package(OpenCV REQUIRED)
+# find_package(OpenCV REQUIRED)
 
 find_package(Boost REQUIRED)
 

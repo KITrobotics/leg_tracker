@@ -1,4 +1,8 @@
+
 isOnePersonToTrack: true
+
+with_map: true
+#with_map: false
 
 x_lower_limit: -1.9
 x_upper_limit: -0.2

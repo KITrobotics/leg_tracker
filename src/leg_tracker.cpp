@@ -17,8 +17,8 @@
 #include <tf2_sensor_msgs/tf2_sensor_msgs.h>
 #include <pcl_ros/point_cloud.h>
 #include <pcl/filters/passthrough.h>
-#include "opencv2/core/version.hpp"
-#include <opencv2/highgui/highgui.hpp>
+// #include "opencv2/core/version.hpp"
+// #include <opencv2/highgui/highgui.hpp>
 #include <pcl/sample_consensus/ransac.h>
 #include <pcl/sample_consensus/sac_model_circle.h>
 #include <pcl/ModelCoefficients.h>
@@ -110,6 +110,11 @@ private:
   double x_upper_limit;
   double y_lower_limit;
   double y_upper_limit;
+  
+  double x_lower_limit_dynamic;
+  double x_upper_limit_dynamic;
+  double y_lower_limit_dynamic;
+  double y_upper_limit_dynamic;
   tf2_ros::Buffer tfBuffer;
   tf2_ros::TransformListener tfListener;
   ros::Publisher vis_pub;
@@ -146,6 +151,14 @@ private:
   double max_cov;
   double min_dist_travelled;
   double in_free_space_threshold;
+  
+  
+  double ellipse_x;
+  double ellipse_y;
+  double ellipse_rx;
+  double ellipse_ry;
+  
+  double waitForTrackingZoneReset;
   
   nav_msgs::OccupancyGrid global_map;
   bool got_map;
@@ -186,6 +199,7 @@ public:
   void init()
   {
     std::srand(1);
+   
 
 //     nh_.param("scan_topic", scan_topic, std::string("/base_laser_rear/scan"));
     nh_.param("scan_topic", scan_topic, std::string("/scan_unified"));
@@ -195,6 +209,10 @@ public:
     nh_.param("x_upper_limit", x_upper_limit, 0.5);
     nh_.param("y_lower_limit", y_lower_limit, -0.5);
     nh_.param("y_upper_limit", y_upper_limit, 0.5);
+    x_lower_limit_dynamic = x_lower_limit;
+    x_upper_limit_dynamic = x_upper_limit;
+    y_lower_limit_dynamic = y_lower_limit;
+    y_upper_limit_dynamic = y_upper_limit;
     nh_.param("leg_radius", leg_radius, 0.1);
     nh_.param("min_observations", min_observations, 4);
     // nh_.param("min_predictions", min_predictions, 7);
@@ -433,6 +451,34 @@ public:
     tf2::doTransform(from, to, transformStamped);
     return true;
   }
+  
+  void filterEllipse(const PointCloud& in, PointCloud& out)
+  {
+//     out.header = in.header;
+    ellipse_x = (legs[0].getPos().x + legs[1].getPos().x) / 2;
+    ellipse_y = (legs[0].getPos().y + legs[1].getPos().y) / 2;
+    
+    double dist = std::sqrt(std::pow(legs[0].getPos().x - legs[1].getPos().x, 2) + std::pow(legs[0].getPos().y - legs[1].getPos().y, 2));
+    ellipse_rx = dist + 0.6;
+    ellipse_ry = 0.6;
+    
+    double diff_x = legs[0].getPos().x - legs[1].getPos().x;
+    double diff_y = legs[0].getPos().y - legs[1].getPos().y;
+    double angle = std::atan2( diff_y, diff_x );
+    
+    
+    for (Point p : in.points)
+    {
+      double temp_diff_x = p.x - ellipse_x;
+      double temp_diff_y = p.y - ellipse_y;
+      double temp_fst = std::pow( (std::cos(angle) * temp_diff_x + std::sin(angle) * temp_diff_y), 2 ) / std::pow(ellipse_rx, 2);
+      double temp_snd = std::pow( (std::sin(angle) * temp_diff_x + std::cos(angle) * temp_diff_y), 2 ) / std::pow(ellipse_ry, 2);
+      if ( temp_fst + temp_snd <= 1)
+      {
+	out.points.push_back(p);
+      }
+    }
+  }
 
   bool filterPCLPointCloud(const PointCloud& in, PointCloud& out)
   {
@@ -441,6 +487,12 @@ public:
       ROS_DEBUG("Filtering: Too small number of points in the input PointCloud!");
       return false;
     }
+    
+//     if (legs.size() == 2) 
+//     {
+//       filterEllipse(in, out);
+//       return true;
+//     }
 
 //     PointCloud::Ptr pass_through_filtered_x (new PointCloud());
 //     PointCloud::Ptr pass_through_filtered_y (new PointCloud());
@@ -453,7 +505,11 @@ public:
     pcl::PassThrough<Point> pass;
     pass.setInputCloud(in.makeShared());
     pass.setFilterFieldName("x");
-    pass.setFilterLimits(x_lower_limit, x_upper_limit);
+    if (isOnePersonToTrack) {
+      pass.setFilterLimits(x_lower_limit_dynamic, x_upper_limit_dynamic);
+    } else {
+      pass.setFilterLimits(x_lower_limit, x_upper_limit);
+    }
     pass.setFilterLimitsNegative (false);
     pass.filter ( pass_through_filtered_x );
     if ( pass_through_filtered_x.points.size() < 5)
@@ -463,7 +519,11 @@ public:
     }
     pass.setInputCloud( pass_through_filtered_x.makeShared());
     pass.setFilterFieldName("y");
-    pass.setFilterLimits(y_lower_limit, y_upper_limit);
+    if (isOnePersonToTrack) {
+      pass.setFilterLimits(y_lower_limit_dynamic, y_upper_limit_dynamic);
+    } else {
+      pass.setFilterLimits(y_lower_limit, y_upper_limit);
+    }
     pass.filter (pass_through_filtered_y);
     if ( pass_through_filtered_y.points.size() < 5)
     {
@@ -756,26 +816,183 @@ public:
 
 //     visualization_msgs::MarkerArray ma;
 
-
+    bool toReset = false;
     for (int i = 0; i < legs.size(); i++)
     {
       if (!legs[i].is_dead()) {
 	legs[i].predict();
+	if (legs[i].getPos().x > x_upper_limit || legs[i].getPos().y > y_upper_limit || 
+	  legs[i].getPos().x < x_lower_limit || legs[i].getPos().y < y_lower_limit)
+	{
+	  toReset = true;
+	}
       }
     }
-
-
-    // if there is matched measurement then update else predict
-    for (int i = 0; i < legs.size(); i++)
+    
+    if (toReset) 
     {
-      if (cluster_centroids.points.size() == 0) { legs[i].missed();  continue; }
+      legs.clear();
+      resetTrackingZone();
+      return;
+    }
+    
+    
+    if (cluster_centroids.points.size() == 0) { return; }
+    
+    if (cluster_centroids.points.size() == 1) {
+      Point p = cluster_centroids.points[0];
+      double min_dist = max_cost;
+      int index = -1;
+      for (int i = 0; i < legs.size(); i++) {
+	double cov = legs[i].getMeasToTrackMatchingCov();
+	double mahalanobis_dist = std::sqrt((std::pow((p.x - legs[i].getPos().x), 2) +
+	  std::pow((p.y - legs[i].getPos().y), 2)) / cov);
+	double euclid_dist = distanceBtwTwoPoints(p, legs[i].getPos());
+	if (mahalanobis_dist < min_dist && euclid_dist < 0.25)
+	{
+	  index = i;
+	  min_dist = mahalanobis_dist;
+	}
+      }
+      if (index != -1)  
+      { 
+	legs[index].update(p);
+      }	
+    } else if (legs.size() == 1) {
+      double min_dist = max_cost;
+      int index = -1;
+      for (int i = 0; i < cluster_centroids.points.size(); i++) {
+	double cov = legs[i].getMeasToTrackMatchingCov();
+	double mahalanobis_dist = std::sqrt((std::pow((cluster_centroids.points[i].x - legs[i].getPos().x), 2) +
+	  std::pow((cluster_centroids.points[i].y - legs[i].getPos().y), 2)) / cov);
+	double euclid_dist = distanceBtwTwoPoints(cluster_centroids.points[i], legs[i].getPos());
+	if (mahalanobis_dist < min_dist && euclid_dist < 0.25)
+	{
+	  index = i;
+	  min_dist = mahalanobis_dist;
+	}
+      }
+      if (index != -1)  
+      { 
+	legs[0].update(cluster_centroids.points[index]);
+      }	
+    } else if (legs.size() == 2 && cluster_centroids.points.size() > 1) {
+      
+      double total_cost = max_cost;
+      double fst_cov = legs[0].getMeasToTrackMatchingCov();
+      double snd_cov = legs[1].getMeasToTrackMatchingCov();
+      int fst_index = -1, snd_index = -1;
+      
+      for (int i = 0; i < cluster_centroids.points.size(); i++) {
+	double euclid_dist = distanceBtwTwoPoints(cluster_centroids.points[i], legs[0].getPos());
+// 	if (euclid_dist > 0.25 && cluster_centroids.points.size() ) { continue; }
+	double fst_cost = std::sqrt((std::pow((cluster_centroids.points[i].x - legs[0].getPos().x), 2) +
+	  std::pow((cluster_centroids.points[i].y - legs[0].getPos().y), 2)) / fst_cov);
+	for (int j = 0; j < cluster_centroids.points.size(); j++) {
+	  if (i == j) { continue; }
+	  double snd_cost = std::sqrt((std::pow((cluster_centroids.points[j].x - legs[i].getPos().x), 2) +
+	    std::pow((cluster_centroids.points[j].y - legs[i].getPos().y), 2)) / snd_cov);
+	  if (fst_cost + snd_cost < total_cost) {
+	    total_cost = fst_cost + snd_cost;
+	    fst_index = i;
+	    snd_index = j;
+	  }
+	}
+      }
+      
+      if (fst_index == -1 || snd_index == -1) { return; }
+      
+      legs[0].update(cluster_centroids.points[fst_index]);
+      legs[1].update(cluster_centroids.points[snd_index]);
+    } 
+    
+    
+    if (legs.size() == 2) {
+      double uncertainty = 0.2;
+      x_lower_limit_dynamic = std::min(legs[0].getPos().x, legs[1].getPos().x);
+      if (x_lower_limit_dynamic < 0) { x_lower_limit_dynamic -= uncertainty; }
+      else { x_lower_limit_dynamic -= uncertainty; }
+      
+      x_upper_limit_dynamic = std::max(legs[0].getPos().x, legs[1].getPos().x);
+      if (x_upper_limit_dynamic < 0) { x_upper_limit_dynamic += uncertainty; }
+      else { x_upper_limit_dynamic += uncertainty; }
+      
+      y_lower_limit_dynamic = std::min(legs[0].getPos().y, legs[1].getPos().y);
+      if (y_lower_limit_dynamic < 0) { y_lower_limit_dynamic -= uncertainty; }
+      else { y_lower_limit_dynamic -= uncertainty; }
+      
+      y_upper_limit_dynamic = std::max(legs[0].getPos().y, legs[1].getPos().y);
+      if (y_upper_limit_dynamic < 0) { y_upper_limit_dynamic += uncertainty; }
+      else { y_upper_limit_dynamic += uncertainty; }
+      
+      ROS_INFO("x_lower_limit_dynamic: %f, x_upper_limit_dynamic: %f, y_lower_limit_dynamic: %f, y_upper_limit_dynamic: %f, flaeche: %f", 
+	       x_lower_limit_dynamic, x_upper_limit_dynamic, y_lower_limit_dynamic, y_upper_limit_dynamic, 
+	       (x_upper_limit_dynamic - x_lower_limit_dynamic) * (y_upper_limit_dynamic - y_lower_limit_dynamic));
+      if (x_lower_limit_dynamic < x_lower_limit) {
+	x_lower_limit_dynamic = x_lower_limit;
+      }
+      if (x_upper_limit_dynamic > x_upper_limit) {
+	x_upper_limit_dynamic = x_upper_limit;
+      }
+      if (y_lower_limit_dynamic < y_lower_limit) {
+	y_lower_limit_dynamic = y_lower_limit;
+      }
+      if (y_upper_limit_dynamic > y_upper_limit) {
+	y_upper_limit_dynamic = y_upper_limit;
+      }
+      if ((x_upper_limit_dynamic - x_lower_limit_dynamic) * (y_upper_limit_dynamic - y_lower_limit_dynamic) < 0.17)
+      {
+	resetTrackingZone();
+      }
+    }
+    
+    
+    
+    
+//     std::vector<int> update_indices;
+//     update_indices.resize(legs.size());
+    
+// 	double cov = legs[i].getMeasToTrackMatchingCov();
+// 	double mahalanobis_dist = std::sqrt((std::pow((cluster_centroids.points[j].x - legs[i].getPos().x), 2) +
+// 	  std::pow((cluster_centroids.points[j].y - legs[i].getPos().y), 2)) / cov);
+// 	if (mahalanobis_dist < min_dist)
+// 	{
+// 	  index = i;
+// 	  min_dist = mahalanobis_dist;
+// 	}
+//       }
+//       if (index == -1)  
+//       { 
+// 	return;
+//       }
+//       
+//       
+//       for (int k = i + 1; k < legs.size(); k++) {
+// 	
+//       }
+//       
+//     }
+//     
+//     
+//     
+//     for (int i = 0; i < cloud.points.size(); i++)
+//     {
+//       
+//       
+//     }
+    
+    
+    // if there is matched measurement then update else predict
+//     for (int i = 0; i < legs.size(); i++)
+//     {
+//       if (cluster_centroids.points.size() == 0) { legs[i].missed();  continue; }
 
-      Point match;
+//       Point match;
       //ma.markers.push_back(getMarker(prediction.x, prediction.y, 10, false));
 
 //       if (!findAndEraseMatch(legs[i].getPos(), cluster_centroids, match, max_nn_gating_distance)) { legs[i].missed(); }
-      if (!findAndEraseMatchWithCov(i, cluster_centroids, match)) { legs[i].missed(); }
-      else { legs[i].update(match); }
+//       if (!findAndEraseMatchWithCov(i, cluster_centroids, match)) { legs[i].missed(); }
+//       else { legs[i].update(match); }
 
       // Eigen::MatrixXd gate;
       // if (!legs[i].getGatingMatrix(gate)) { ROS_WARN("Could not get the gating matrix!"); predictLeg(i); continue; }
@@ -784,16 +1001,29 @@ public:
 
       // if (!findAndEraseMatchWithCov(i, prediction, cluster_centroids, match)) { predictLeg(i); }
       // else { updateLeg(legs[i], match); }
-    }
-    cullDeadTracks(legs);
+//     }
+//     cullDeadTracks(legs);
+
 
     if (legs.size() < 2) {
       for (Point& p : cluster_centroids.points)
       {
 	legs.push_back(initLeg(p));
+	if (legs.size() >= 2) { break; }
       }
     }
   }
+  
+  void resetTrackingZone() 
+  {
+    x_lower_limit_dynamic = x_lower_limit;
+    x_upper_limit_dynamic = x_upper_limit;
+    y_lower_limit_dynamic = y_lower_limit;
+    y_upper_limit_dynamic = y_upper_limit;
+  }
+  
+  
+  
 
       /*
 =======
@@ -1670,7 +1900,7 @@ public:
       
       
       
-      if (got_map) {
+      if (with_map && got_map) {
 	
 	bool isPointTransformed = true;
 	geometry_msgs::PointStamped point_in, point_out;
@@ -2194,95 +2424,95 @@ public:
 //     return true;
 //   }
 
-  bool computeCircularity(const PointCloud::Ptr cloud, std::vector<double>& center)
-  {
-    int num_points = cloud->points.size();
-    if (num_points < minClusterSize) { ROS_ERROR("Circularity and Linerity: Too small number of points!"); return false; }
-    double x_mean, y_mean;
-    CvMat* A = cvCreateMat(num_points, 3, CV_64FC1);
-    CvMat* B = cvCreateMat(num_points, 1, CV_64FC1);
-
-//     CvMat* points = cvCreateMat(num_points, 2, CV_64FC1);
-
-    int j = 0;
-    for (Point p : cloud->points)
-    {
-      x_mean += p.x / num_points;
-      y_mean += p.y / num_points;
-
-//       cvmSet(points, j, 0, p.x - x_mean);
-//       cvmSet(points, j, 1, p.y - y_mean);
-
-      cvmSet(A, j, 0, -2.0 * p.x);
-      cvmSet(A, j, 1, -2.0 * p.y);
-      cvmSet(A, j, 2, 1);
-
-      cvmSet(B, j, 0, -pow(p.x, 2) - pow(p.y, 2));
-      j++;
-    }
-
-//     CvMat* W = cvCreateMat(2, 2, CV_64FC1);
-//     CvMat* U = cvCreateMat(num_points, 2, CV_64FC1);
-//     CvMat* V = cvCreateMat(2, 2, CV_64FC1);
-//     cvSVD(points, W, U, V);
-//
-//     CvMat* rot_points = cvCreateMat(num_points, 2, CV_64FC1);
-//     cvMatMul(U, W, rot_points);
-//
-//     // Compute Linearity
-//     double linearity = 0.0;
-//     for (int i = 0; i < num_points; i++)
+//   bool computeCircularity(const PointCloud::Ptr cloud, std::vector<double>& center)
+//   {
+//     int num_points = cloud->points.size();
+//     if (num_points < minClusterSize) { ROS_ERROR("Circularity and Linerity: Too small number of points!"); return false; }
+//     double x_mean, y_mean;
+//     CvMat* A = cvCreateMat(num_points, 3, CV_64FC1);
+//     CvMat* B = cvCreateMat(num_points, 1, CV_64FC1);
+// 
+// //     CvMat* points = cvCreateMat(num_points, 2, CV_64FC1);
+// 
+//     int j = 0;
+//     for (Point p : cloud->points)
 //     {
-//       linearity += pow(cvmGet(rot_points, i, 1), 2);
+//       x_mean += p.x / num_points;
+//       y_mean += p.y / num_points;
+// 
+// //       cvmSet(points, j, 0, p.x - x_mean);
+// //       cvmSet(points, j, 1, p.y - y_mean);
+// 
+//       cvmSet(A, j, 0, -2.0 * p.x);
+//       cvmSet(A, j, 1, -2.0 * p.y);
+//       cvmSet(A, j, 2, 1);
+// 
+//       cvmSet(B, j, 0, -pow(p.x, 2) - pow(p.y, 2));
+//       j++;
 //     }
-//
-//     cvReleaseMat(&points);
-//     points = 0;
-//     cvReleaseMat(&W);
-//     W = 0;
-//     cvReleaseMat(&U);
-//     U = 0;
-//     cvReleaseMat(&V);
-//     V = 0;
-//     cvReleaseMat(&rot_points);
-//     rot_points = 0;
-
-
-
-    // Compute Circularity
-
-    CvMat* sol = cvCreateMat(3, 1, CV_64FC1);
-
-    cvSolve(A, B, sol, CV_SVD);
-
-    double xc = cvmGet(sol, 0, 0);
-    double yc = cvmGet(sol, 1, 0);
-    double rc = sqrt(pow(xc, 2) + pow(yc, 2) - cvmGet(sol, 2, 0));
-
-    center.clear();
-    center.push_back(xc);
-    center.push_back(yc);
-
-    return true;
-
-//     pub_circle(xc, yc, rc, isLeft, isLeft ? 0 : 1);
-
-//     cvReleaseMat(&A);
-//     A = 0;
-//     cvReleaseMat(&B);
-//     B = 0;
-//     cvReleaseMat(&sol);
-//     sol = 0;
-//
-//     float circularity = 0.0;
-//     for (SampleSet::iterator i = cluster->begin();
-// 	i != cluster->end();
-// 	i++)
-//     {
-//       circularity += pow(rc - sqrt(pow(xc - (*i)->x, 2) + pow(yc - (*i)->y, 2)), 2);
-//     }
-
-  }
+// 
+// //     CvMat* W = cvCreateMat(2, 2, CV_64FC1);
+// //     CvMat* U = cvCreateMat(num_points, 2, CV_64FC1);
+// //     CvMat* V = cvCreateMat(2, 2, CV_64FC1);
+// //     cvSVD(points, W, U, V);
+// //
+// //     CvMat* rot_points = cvCreateMat(num_points, 2, CV_64FC1);
+// //     cvMatMul(U, W, rot_points);
+// //
+// //     // Compute Linearity
+// //     double linearity = 0.0;
+// //     for (int i = 0; i < num_points; i++)
+// //     {
+// //       linearity += pow(cvmGet(rot_points, i, 1), 2);
+// //     }
+// //
+// //     cvReleaseMat(&points);
+// //     points = 0;
+// //     cvReleaseMat(&W);
+// //     W = 0;
+// //     cvReleaseMat(&U);
+// //     U = 0;
+// //     cvReleaseMat(&V);
+// //     V = 0;
+// //     cvReleaseMat(&rot_points);
+// //     rot_points = 0;
+// 
+// 
+// 
+//     // Compute Circularity
+// 
+//     CvMat* sol = cvCreateMat(3, 1, CV_64FC1);
+// 
+//     cvSolve(A, B, sol, CV_SVD);
+// 
+//     double xc = cvmGet(sol, 0, 0);
+//     double yc = cvmGet(sol, 1, 0);
+//     double rc = sqrt(pow(xc, 2) + pow(yc, 2) - cvmGet(sol, 2, 0));
+// 
+//     center.clear();
+//     center.push_back(xc);
+//     center.push_back(yc);
+// 
+//     return true;
+// 
+// //     pub_circle(xc, yc, rc, isLeft, isLeft ? 0 : 1);
+// 
+// //     cvReleaseMat(&A);
+// //     A = 0;
+// //     cvReleaseMat(&B);
+// //     B = 0;
+// //     cvReleaseMat(&sol);
+// //     sol = 0;
+// //
+// //     float circularity = 0.0;
+// //     for (SampleSet::iterator i = cluster->begin();
+// // 	i != cluster->end();
+// // 	i++)
+// //     {
+// //       circularity += pow(rc - sqrt(pow(xc - (*i)->x, 2) + pow(yc - (*i)->y, 2)), 2);
+// //     }
+// 
+//   }
 
    void predictLegs()
    {
@@ -2820,15 +3050,25 @@ public:
 //     marker.id = id;
     marker.type = visualization_msgs::Marker::CUBE;
     marker.action = visualization_msgs::Marker::ADD;
-    marker.pose.position.x = (x_upper_limit + x_lower_limit) / 2;
-    marker.pose.position.y = (y_upper_limit + y_lower_limit) / 2;
+    if (isOnePersonToTrack) {
+      marker.pose.position.x = (x_upper_limit_dynamic + x_lower_limit_dynamic) / 2;
+      marker.pose.position.y = (y_upper_limit_dynamic + y_lower_limit_dynamic) / 2;
+    } else {
+      marker.pose.position.x = (x_upper_limit + x_lower_limit) / 2;
+      marker.pose.position.y = (y_upper_limit + y_lower_limit) / 2;
+    }
     marker.pose.position.z = 0.0;
 //     marker.pose.orientation.x = orientation_x;
 //     marker.pose.orientation.y = orientation_y;
 //     marker.pose.orientation.z = orientation_z;
 //     marker.pose.orientation.w = orientation_w;
-    marker.scale.x = x_upper_limit - x_lower_limit;
-    marker.scale.y = y_upper_limit - y_lower_limit;
+    if (isOnePersonToTrack) {
+      marker.scale.x = x_upper_limit_dynamic - x_lower_limit_dynamic;
+      marker.scale.y = y_upper_limit_dynamic - y_lower_limit_dynamic;
+    } else {
+      marker.scale.x = x_upper_limit - x_lower_limit;
+      marker.scale.y = y_upper_limit - y_lower_limit;
+    }
 //     marker.scale.z = 0;
     marker.color.a = 1.0; // Don't forget to set the alpha!
     marker.color.g = 1.0;
@@ -2986,6 +3226,13 @@ public:
 
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
+    if (waitForTrackingZoneReset * 0.05 > 5.0) 
+    {
+      resetTrackingZone();
+      waitForTrackingZoneReset = 0;
+    }
+    waitForTrackingZoneReset++;
+    ros::Time lasttime=ros::Time::now();
     if (with_map) {
       if (!got_map) { return; }
     }
@@ -3027,6 +3274,7 @@ public:
     PointCloud cloudXYZ, filteredCloudXYZ;
 //     ROS_INFO("7");
     pcl::fromPCLPointCloud2(*pcl_pc2, cloudXYZ);
+    filteredCloudXYZ.header = cloudXYZ.header;
 //     ROS_INFO("8");
     if (!filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { predictLegs(); return; }
 //     ROS_INFO("9");
@@ -3085,6 +3333,11 @@ public:
 //     if (!useKalmanFilterAndPubCircles(left, true)) { return; }
 //     if (!useKalmanFilterAndPubCircles(right, false)) { return; }
 
+    ros::Time currtime=ros::Time::now();
+    ros::Duration diff=currtime-lasttime;
+
+    std::cout<<"diff: "<<diff<<std::endl;
+    waitForTrackingZoneReset--;
 
   }
 };
