@@ -10,9 +10,9 @@ min_observations: 3
 min_predictions: 3
 max_dist_btw_legs: 0.8
 z_coordinate: 0.0
-vel_stance_threshold: 0.47
-vel_swing_threshold: 0.93
-state_dimensions: 6
+#vel_stance_threshold: 0.47
+#vel_swing_threshold: 0.93
+#state_dimensions: 6
 clusterTolerance: 0.07
 minClusterSize: 3
 maxClusterSize: 100
@@ -23,6 +23,13 @@ min_dist_travelled: 0.25
 max_cov: 0.81
 #in_free_space_threshold: 0.06
 in_free_space_threshold: 0.3
+mahalanobis_dist_gate: 1.2
+euclidian_dist_gate: 0.4
+max_cost: 999999.
+tracking_bounding_box_uncertainty: 0.2
+cluster_bounding_box_uncertainty: 0.04
+outlier_removal_radius: 0.07
+max_neighbors_for_outlier_removal: 3
 
 
 
