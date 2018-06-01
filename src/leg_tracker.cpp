@@ -437,7 +437,8 @@ public:
   }
   
 
-  void matchLegCandidates(PointCloud cluster_centroids)
+  // only for the user of the robot platform
+  void matchClusterCentroidsToLegs(PointCloud cluster_centroids)
   {
     bool toReset = false;
     for (int i = 0; i < legs.size(); i++)
@@ -533,20 +534,16 @@ public:
     if (legs.size() == 2) {
       double uncertainty = 0.2;
       x_lower_limit_dynamic = std::min(legs[0].getPos().x, legs[1].getPos().x);
-      if (x_lower_limit_dynamic < 0) { x_lower_limit_dynamic -= uncertainty; }
-      else { x_lower_limit_dynamic -= uncertainty; }
+      x_lower_limit_dynamic -= uncertainty;
       
       x_upper_limit_dynamic = std::max(legs[0].getPos().x, legs[1].getPos().x);
-      if (x_upper_limit_dynamic < 0) { x_upper_limit_dynamic += uncertainty; }
-      else { x_upper_limit_dynamic += uncertainty; }
+      x_upper_limit_dynamic += uncertainty;
       
       y_lower_limit_dynamic = std::min(legs[0].getPos().y, legs[1].getPos().y);
-      if (y_lower_limit_dynamic < 0) { y_lower_limit_dynamic -= uncertainty; }
-      else { y_lower_limit_dynamic -= uncertainty; }
+      y_lower_limit_dynamic -= uncertainty;
       
       y_upper_limit_dynamic = std::max(legs[0].getPos().y, legs[1].getPos().y);
-      if (y_upper_limit_dynamic < 0) { y_upper_limit_dynamic += uncertainty; }
-      else { y_upper_limit_dynamic += uncertainty; }
+      y_upper_limit_dynamic += uncertainty;
       
 //       ROS_INFO("x_lower_limit_dynamic: %f, x_upper_limit_dynamic: %f, y_lower_limit_dynamic: %f, y_upper_limit_dynamic: %f, flaeche: %f", 
 // 	       x_lower_limit_dynamic, x_upper_limit_dynamic, y_lower_limit_dynamic, y_upper_limit_dynamic, 
@@ -1461,7 +1458,7 @@ public:
     if (cluster_centroids.points.size() == 0) { predictLegs(); return; }
 
     if (isOnePersonToTrack) {
-      matchLegCandidates(cluster_centroids);
+      matchClusterCentroidsToLegs(cluster_centroids);
     } else {
       gnn_munkres(cluster_centroids);
     }
