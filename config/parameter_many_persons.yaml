@@ -1,7 +1,9 @@
 isOnePersonToTrack: false
+isBoundingBoxTracking: false
+#isBoundingBoxTracking: true
 
-with_map: true
-#with_map: false
+#with_map: true
+with_map: false
 
 # front_cutted.bag
 #x_lower_limit: -2.6
@@ -16,10 +18,10 @@ with_map: true
 #y_upper_limit: 1.8
 
 # drehen_two_persons.bag
-#x_lower_limit: -1.0
-#x_upper_limit: 1.0
-#y_lower_limit: -1.0
-#y_upper_limit: 1.0
+x_lower_limit: -1.0
+x_upper_limit: 1.0
+y_lower_limit: -1.0
+y_upper_limit: 1.0
 
 # wand.bag
 #x_lower_limit: -3.5
@@ -33,17 +35,25 @@ with_map: true
 #y_lower_limit: -0.8
 #y_upper_limit: 0.8
 
-#actual limits
+# actual limits
 #x_lower_limit: -2.5
 #x_upper_limit: 2.5
 #y_lower_limit: -2.5
 #y_upper_limit: 2.5
 
-#extended limits
-x_lower_limit: -5.0
-x_upper_limit: 5.0
-y_lower_limit: -5.0
-y_upper_limit: 5.0
+# extended limits
+#x_lower_limit: -5.0
+#x_upper_limit: 5.0
+#y_lower_limit: -5.0
+#y_upper_limit: 5.0
+
+
+# sr1
+#x_lower_limit: 0.3
+#x_upper_limit: 2.2
+#y_lower_limit: -0.7
+#y_upper_limit: 1.3
+
 
 
 

@@ -1,10 +1,16 @@
-
 isOnePersonToTrack: true
+isBoundingBoxTracking: false
 
-with_map: true
-#with_map: false
+#with_map: true
+with_map: false
 
-x_lower_limit: -1.9
-x_upper_limit: -0.2
-y_lower_limit: -0.8
-y_upper_limit: 0.8
+#x_lower_limit: -1.9
+#x_upper_limit: -0.2
+#y_lower_limit: -0.8
+#y_upper_limit: 0.8
+
+# sr1
+x_lower_limit: 0.3
+x_upper_limit: 2.2
+y_lower_limit: -0.7
+y_upper_limit: 1.3

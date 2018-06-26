@@ -80,7 +80,7 @@ public:
 
     filter = new KalmanFilter();
     if (!filter->configure(in)) { ROS_ERROR("Leg.h: Configure of filter has failed!"); }
-    filter->getCovarianceMatrix(cov);
+    filter->getErrorCovarianceMatrix(cov);
   }
 
   unsigned int getLegId()
@@ -88,9 +88,9 @@ public:
     return legId;
   }
   
-  void resetCovAndState()
+  void resetErrorCovAndState()
   {
-    filter->resetCovAndState();
+    filter->resetErrorCovAndState();
   }
 
   bool is_within_region(const Point& p, double std)
@@ -160,7 +160,7 @@ public:
     vel.y = prediction[3];
     acc.x = prediction[4];
     acc.y = prediction[5];
-    filter->getCovarianceMatrix(cov);
+    filter->getErrorCovarianceMatrix(cov);
   }
   
   
@@ -182,7 +182,7 @@ public:
     vel.y = out[3];
     acc.x = out[4];
     acc.y = out[5];
-    filter->getCovarianceMatrix(cov);
+    filter->getErrorCovarianceMatrix(cov);
     updateHistory(out);
     occluded_age = 0;
     if (observations < min_observations) { observations++; }

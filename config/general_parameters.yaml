@@ -1,5 +1,9 @@
 #scan_topic: /base_laser_rear/scan
 scan_topic: /scan_unified
+#scan_topic: /sick_s300/scan_in
+
+frequency: 0.05
+
 transform_link: base_link
 local_map_topic: /move_base/global_costmap/costmap
 
@@ -15,14 +19,14 @@ z_coordinate: 0.0
 #state_dimensions: 6
 clusterTolerance: 0.07
 minClusterSize: 3
-maxClusterSize: 100
+maxClusterSize: 120
 max_nn_gating_distance: 1.0
 occluded_dead_age: 10
 variance_observation: 0.25
 min_dist_travelled: 0.25
 max_cov: 0.81
 #in_free_space_threshold: 0.06
-in_free_space_threshold: 0.3
+in_free_space_threshold: 0.1
 mahalanobis_dist_gate: 1.2
 euclidian_dist_gate: 0.4
 max_cost: 999999.
