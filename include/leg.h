@@ -163,7 +163,10 @@ public:
     filter->getErrorCovarianceMatrix(cov);
   }
   
-  
+  bool getCurrentState(std::vector<double>& out)
+  {
+    return filter->getCurrentState(out);
+  }
 
   void update(const Point& p)
   {

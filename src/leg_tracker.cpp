@@ -60,8 +60,8 @@ private:
   laser_geometry::LaserProjection projector_;
   ros::Publisher sensor_msgs_point_cloud_publisher;
   ros::Publisher pcl_cloud_publisher;
-  ros::Publisher pos_vel_acc_lleg_pub;
-  ros::Publisher pos_vel_acc_rleg_pub;
+  ros::Publisher pos_vel_acc_fst_leg_pub;
+  ros::Publisher pos_vel_acc_snd_leg_pub;
   ros::Publisher legs_and_vel_direction_publisher;
   ros::Publisher tracking_area_pub;
   ros::Publisher people_pub;
@@ -219,21 +219,21 @@ public:
 
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 1, &LegDetector::processLaserScan, this);
     global_map_sub = nh_.subscribe<nav_msgs::OccupancyGrid>(global_map_topic, 10, &LegDetector::globalMapCallback, this);
-    sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 300);
-    pcl_cloud_publisher = nh_.advertise<PointCloud> ("scan2pclCloud", 300);
-    pos_vel_acc_lleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_lleg", 300);
-    pos_vel_acc_rleg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_rleg", 300);
+//     sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 300);
+//     pcl_cloud_publisher = nh_.advertise<PointCloud> ("scan2pclCloud", 300);
+    pos_vel_acc_fst_leg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_fst_leg", 300);
+    pos_vel_acc_snd_leg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_snd_leg", 300);
     legs_and_vel_direction_publisher = nh_.advertise<visualization_msgs::MarkerArray>("legs_and_vel_direction", 300);
     tracking_area_pub = nh_.advertise<visualization_msgs::Marker>("tracking_area", 300);
     people_pub = nh_.advertise<visualization_msgs::MarkerArray>("people", 300);
-    marker_pub = nh_.advertise<visualization_msgs::Marker>("line_strip", 10);
-    cov_marker_pub = nh_.advertise<visualization_msgs::MarkerArray>("cov_ellipses", 10);
+//     marker_pub = nh_.advertise<visualization_msgs::Marker>("line_strip", 10);
+//     cov_marker_pub = nh_.advertise<visualization_msgs::MarkerArray>("cov_ellipses", 10);
     
-    bounding_box_pub = nh_.advertise<visualization_msgs::Marker>("bounding_box", 300);
-    tracking_zone_pub = nh_.advertise<visualization_msgs::MarkerArray>("tracking_zones", 100);
-    paths_publisher = nh_.advertise<visualization_msgs::MarkerArray>("paths", 100);
+//     bounding_box_pub = nh_.advertise<visualization_msgs::Marker>("bounding_box", 300);
+//     tracking_zone_pub = nh_.advertise<visualization_msgs::MarkerArray>("tracking_zones", 100);
+//     paths_publisher = nh_.advertise<visualization_msgs::MarkerArray>("paths", 100);
     
-    client = nh_.serviceClient<nav_msgs::GetMap>("static_map");
+//     client = nh_.serviceClient<nav_msgs::GetMap>("static_map");
   }
   
   
@@ -312,6 +312,27 @@ public:
     tf2::doTransform(from, to, transformStamped);
     return true;
   }
+  
+  void pub_leg_posvelacc(std::vector<double>& in, bool isLeft)
+  {
+    if (in.size() != 6 + 1) { ROS_ERROR("Invalid vector of leg posvelacc!"); return; }
+
+    std_msgs::Float64MultiArray msg;
+
+    // set up dimensions
+    msg.layout.dim.push_back(std_msgs::MultiArrayDimension());
+    msg.layout.dim[0].size = in.size();
+    msg.layout.dim[0].stride = 1;
+    msg.layout.dim[0].label = "posXY_velXY_accXY_confidence";
+
+    // copy in the data
+    msg.data.clear();
+    msg.data.insert(msg.data.end(), in.begin(), in.end());
+
+    if (isLeft) { pos_vel_acc_fst_leg_pub.publish(msg); }
+    else { pos_vel_acc_snd_leg_pub.publish(msg); }
+  }
+
 
 
   // pass through filtering, outlier removal
@@ -431,8 +452,9 @@ public:
     ROS_INFO("%s:", name.c_str());
     for (Leg& l : vec)
     {
-      ROS_INFO("legId: %d, peopleId: %d, pos: (%f, %f), observations: %d, hasPair: %d, missed: %d, dist_traveled: %f",
-      l.getLegId(), l.getPeopleId(), l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair(), l.getOccludedAge(), l.getDistanceTravelled());
+      double confidence = l.hasPair() * std::max(0., (1 - 0.15 * l.getOccludedAge()));
+      ROS_INFO("legId: %d, peopleId: %d, confidence: %f, pos: (%f, %f), observations: %d, hasPair: %d, missed: %d, dist_traveled: %f",
+      l.getLegId(), l.getPeopleId(), confidence, l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair(), l.getOccludedAge(), l.getDistanceTravelled());
     }
   }
   
@@ -541,7 +563,20 @@ public:
     for (int i = 0; i < legs.size(); i++)
     {
       if (!legs[i].is_dead()) {
-	legs[i].predict();
+	
+	if (legs.size() == 2)
+	{
+	  if (distanceBtwTwoPoints(legs[0].getPos(), legs[1].getPos()) <= 0.35)
+	  {
+	    legs[0].predict();
+	    legs[1].predict();
+	  }
+	}
+	else if (legs.size() == 1)
+	{
+	  legs[0].predict();
+	}
+	
 	if (legs[i].getPos().x > x_upper_limit || legs[i].getPos().y > y_upper_limit || 
 	  legs[i].getPos().x < x_lower_limit || legs[i].getPos().y < y_lower_limit)
 	{
@@ -558,7 +593,14 @@ public:
     }
     
     
-    if (cluster_centroids.points.size() == 0) { return; }
+    if (cluster_centroids.points.size() == 0) 
+    { 
+//       for (int i = 0; i < legs.size(); i++)
+//       {
+// 	legs[i].missed();
+//       }
+      return; 
+    }
     
     if (cluster_centroids.points.size() == 1) {
       Point p = cluster_centroids.points[0];
@@ -575,10 +617,16 @@ public:
 	  min_dist = mahalanobis_dist;
 	}
       }
-      if (index != -1)  
+      if (index = 0)  
       { 
-	legs[index].update(p);
+	legs[0].update(p);
+// 	legs[1].missed();
       }	
+      else if (index == 1)
+      {
+	legs[1].update(p);
+// 	legs[0].missed();
+      }
     } else if (legs.size() == 1) {
       double min_dist = max_cost;
       int index = -1;
@@ -863,9 +911,9 @@ public:
       if (distanceBtwTwoPoints(peoplePos, lastPos) > max_dist_btw_legs) { continue; }
       id = std::get<1>(lastSeenPeoplePositions[i]);
       
-      ROS_WARN("new peoplePos: (%f, %f), lastPos: (%f, %f), last id: %d", peoplePos.x, peoplePos.y, lastPos.x, lastPos.y, id);
+//       ROS_WARN("new peoplePos: (%f, %f), lastPos: (%f, %f), last id: %d", peoplePos.x, peoplePos.y, lastPos.x, lastPos.y, id);
       
-      marker_pub.publish(getArrowMarker(3 * peoplePos.x, 3 * peoplePos.y, 3 * lastPos.x, 3 * lastPos.y, 999999));
+//       marker_pub.publish(getArrowMarker(3 * peoplePos.x, 3 * peoplePos.y, 3 * lastPos.x, 3 * lastPos.y, 999999));
       
       restoreId = true;
       removeLastSeenPeoplePosition(i);
@@ -1256,8 +1304,8 @@ public:
       
       if (isFstPointInBox && isSndPointInBox)
       { 
-	pub_bounding_box(minMaxPoints[i].first.x, minMaxPoints[i].first.y, 
-	  minMaxPoints[i].second.x, minMaxPoints[i].second.y);
+// 	pub_bounding_box(minMaxPoints[i].first.x, minMaxPoints[i].first.y, 
+// 	  minMaxPoints[i].second.x, minMaxPoints[i].second.y);
 	
 	std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin();
 	it += i;
@@ -1325,7 +1373,7 @@ public:
     marker.scale.y = max_y - min_y;
     marker.color.a = 1.0; // Don't forget to set the alpha!
     marker.color.g = 1.0;
-    bounding_box_pub.publish( marker );
+//     bounding_box_pub.publish( marker );
   }
   
   void pub_border(double min_x, double min_y, double max_x, double max_y)
@@ -1354,7 +1402,10 @@ public:
       legs[i].predict(); 
       legs[i].missed();
     }
-    cullDeadTracks(legs);
+    if (!isOnePersonToTrack)
+    {
+      cullDeadTracks(legs);
+    }
   }
 
   void removeLegFromVector(std::vector<Leg>& v, unsigned int i)
@@ -1766,8 +1817,8 @@ public:
 	  double mahalanobis_dist = std::sqrt((std::pow((p.x - it_prev->getPos().x), 2) +
 						std::pow((p.y - it_prev->getPos().y), 2)) / cov);
 	  double dist = distanceBtwTwoPoints(p, it_prev->getPos());
-	  cov_ellipse_ma.markers.push_back(getCovarianceEllipse(getNextCovEllipseId(), it_prev->getPos().x,
-	    it_prev->getPos().y, cov_matrix));
+// 	  cov_ellipse_ma.markers.push_back(getCovarianceEllipse(getNextCovEllipseId(), it_prev->getPos().x,
+// 	    it_prev->getPos().y, cov_matrix));
 	  
 	  if (dist <= 0.03)
 	  {
@@ -1785,7 +1836,7 @@ public:
 	r++;
       }
       
-      cov_marker_pub.publish(cov_ellipse_ma);
+//       cov_marker_pub.publish(cov_ellipse_ma);
       
       Munkres<double> m;
       m.solve(matrix);
@@ -1972,7 +2023,7 @@ public:
 	std::map<int, visualization_msgs::Marker>::iterator it = paths.find(pId);
 	if (it != paths.end())
 	{
-	  removeOldMarkers(pId, pId + 1, paths_publisher);
+// 	  removeOldMarkers(pId, pId + 1, paths_publisher);
 	  paths.erase(it);
 	}
 	removeLastSeenPeoplePosition(i);
@@ -2016,7 +2067,7 @@ public:
 
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
-    updatePaths();
+//     updatePaths();
     updateLastSeenPeoplePositions();
     for (int i = 0; i < lastSeenPeoplePositions.size(); i++)
     {
@@ -2104,6 +2155,24 @@ public:
     }
     visLegs();
     findPeople();
+    if (isOnePersonToTrack && legs.size() == 2)
+    {
+      std::vector<double> current_state;
+      double confidence;
+      if (legs[0].getCurrentState(current_state))
+      {
+	confidence = legs[0].hasPair() * std::max(0., (1 - 0.15 * legs[0].getOccludedAge()));
+	current_state.push_back(confidence);
+	pub_leg_posvelacc(current_state, 0);
+      }
+      current_state.clear();
+      if (legs[1].getCurrentState(current_state))
+      {
+	confidence = legs[1].hasPair() * std::max(0., (1 - 0.15 * legs[1].getOccludedAge()));
+	current_state.push_back(confidence);
+	pub_leg_posvelacc(current_state, 1);
+      }
+    }
     vis_people(cloudXYZ.header);
     vis_tracking_zones();
     ros::Time currtime=ros::Time::now();
