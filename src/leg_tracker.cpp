@@ -70,6 +70,7 @@ private:
   ros::Publisher cov_marker_pub;
   ros::Publisher bounding_box_pub;
   ros::Publisher tracking_zone_pub;
+  ros::Publisher paths_publisher;
   
   ros::ServiceClient client; 
   nav_msgs::GetMap srv;
@@ -152,7 +153,10 @@ private:
   
   bool got_map_from_service;
   
+  // counter, peopleId, last position
   std::vector<std::tuple<unsigned int, unsigned int, Point> > lastSeenPeoplePositions;
+  
+  std::map<int, visualization_msgs::Marker> paths;
   
 
 public:
@@ -167,6 +171,8 @@ public:
 
   void init()
   { 
+    std::srand(1);
+    
     nh_.param("scan_topic", scan_topic, std::string("/scan_unified"));
     nh_.param("frequency", frequency, 0.05);
     nh_.param("transform_link", transform_link, std::string("base_link"));
@@ -225,8 +231,15 @@ public:
     
     bounding_box_pub = nh_.advertise<visualization_msgs::Marker>("bounding_box", 300);
     tracking_zone_pub = nh_.advertise<visualization_msgs::MarkerArray>("tracking_zones", 100);
+    paths_publisher = nh_.advertise<visualization_msgs::MarkerArray>("paths", 100);
     
     client = nh_.serviceClient<nav_msgs::GetMap>("static_map");
+  }
+  
+  
+  double getRandomNumberFrom0To1()
+  {
+    return (double)rand() / (double)RAND_MAX ;
   }
   
   
@@ -433,12 +446,11 @@ public:
       i++;
     }
   }
-  
 
-  void removeOldMarkers(int nextId, ros::Publisher ma_publisher)
+  void removeOldMarkers(int from, int toExclusive, ros::Publisher ma_publisher)
   {
     visualization_msgs::MarkerArray ma;
-    for (int i = 0; i < nextId; i++) {
+    for (int i = from; i < toExclusive; i++) {
       visualization_msgs::Marker marker;
       marker.header.frame_id = transform_link;
       marker.header.stamp = ros::Time();
@@ -950,7 +962,7 @@ public:
   }
   
 
-  visualization_msgs::Marker getOvalMarkerForTwoPoints(double x1, double y1, double x2, double y2, int id)
+  visualization_msgs::Marker getOvalMarkerForTwoPoints(int pId, double x1, double y1, double x2, double y2, int id)
   {
     double x = (x1 + x2) / 2;
     double y = (y1 + y2) / 2;
@@ -971,12 +983,24 @@ public:
     double orientation_y = q.y();
     double orientation_z = q.z();
     
+    double r = 0.0, g = 0.0, b = 0.0;
+    if (pId != -1)
+    {
+      std::map<int, visualization_msgs::Marker>::iterator it = paths.find(pId);
+      if (it != paths.end())
+      {
+	r = it->second.color.r;
+	g = it->second.color.g;
+	b = it->second.color.b;
+      }
+    }
+    
     return getOvalMarker(id, x, y, orientation_x, orientation_y, orientation_z, orientation_w,
-      scale_x, scale_y, 0.0, 0.0, 0.0);
+      scale_x, scale_y, r, g, b);
   }
 
 
-  void vis_people()
+  void vis_people(pcl::PCLHeader& header)
   {
     visualization_msgs::MarkerArray ma_people;
 
@@ -995,13 +1019,17 @@ public:
 	      if (distanceBtwTwoPoints(legs[i].getPos(), l.getPos()) > max_dist_btw_legs) {
 		break;
 	      }
-	      ma_people.markers.push_back(getOvalMarkerForTwoPoints(
+	      updatePath(id, header, 
+		legs[i].getPos().x,
+		legs[i].getPos().y,
+		l.getPos().x, 
+		l.getPos().y);
+	      ma_people.markers.push_back(getOvalMarkerForTwoPoints(id,
 		legs[i].getPos().x,
 		legs[i].getPos().y,
 		l.getPos().x, 
 		l.getPos().y, 
 		getPeopleMarkerNextId()));
-
 	      break;
 	    }
 	  }
@@ -1013,7 +1041,9 @@ public:
 	  {
 	    if (legs[j].getPeopleId() == id)
 	    {
-	      ma_people.markers.push_back(getOvalMarkerForTwoPoints(legs[i].getPos().x,
+	      updatePath(id, header, legs[i].getPos().x,
+		  legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y);
+	      ma_people.markers.push_back(getOvalMarkerForTwoPoints(id, legs[i].getPos().x,
 		  legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, getPeopleMarkerNextId()));
 	      break;
 	    }
@@ -1022,6 +1052,40 @@ public:
     }
 
     people_pub.publish(ma_people);
+  }
+  
+  void updatePath(unsigned int pId, pcl::PCLHeader& header, double x1, double y1, double x2, double y2)
+  {
+    geometry_msgs::Point p;
+    p.x = (x1 + x2) / 2;
+    p.y = (y1 + y2) / 2;
+//     ROS_WARN("p: (%f, %f), pId: %d, paths.size: %d", p.x, p.y, pId, (int) paths.size());
+    std::map<int, visualization_msgs::Marker>::iterator it = paths.find(pId);
+    if (it != paths.end())
+    {
+      it->second.points.push_back(p);
+//       ROS_WARN("if it->second.points size: %d", (int) it->second.points.size());
+    }
+    else
+    {
+//       ROS_WARN("else");
+      visualization_msgs::Marker line_strip;
+      line_strip.header.frame_id = header.frame_id;
+      line_strip.header.stamp = ros::Time();
+      line_strip.ns = nh_.getNamespace();
+      line_strip.action = visualization_msgs::Marker::ADD;
+      line_strip.pose.orientation.w = 1.0;
+      line_strip.id = pId;
+      line_strip.scale.x = 0.03;
+      line_strip.color.a = 1.0;
+      line_strip.color.r = getRandomNumberFrom0To1();
+      line_strip.color.g = getRandomNumberFrom0To1();
+      line_strip.color.b = getRandomNumberFrom0To1();
+      line_strip.type = visualization_msgs::Marker::LINE_STRIP;
+      line_strip.points.push_back(p);
+      paths.insert(std::make_pair(pId, line_strip));
+    }
+//     ROS_WARN("at end of updatePath paths.size: %d", (int) paths.size());
   }
 
 
@@ -1685,7 +1749,7 @@ public:
       
       visualization_msgs::MarkerArray cov_ellipse_ma;
       if (cov_ellipse_id != 0) {
-	removeOldMarkers(cov_ellipse_id, cov_marker_pub);
+	removeOldMarkers(0, cov_ellipse_id, cov_marker_pub);
 	cov_ellipse_id = 0;
       }
 
@@ -1863,17 +1927,17 @@ public:
     removeOldBoundingBox();
     
     if (legs_marker_next_id != 0) {
-      removeOldMarkers(legs_marker_next_id, legs_and_vel_direction_publisher);
+      removeOldMarkers(0, legs_marker_next_id, legs_and_vel_direction_publisher);
       legs_marker_next_id = 0;
     }
     
     if (people_marker_next_id != 0) {
-      removeOldMarkers(people_marker_next_id, people_pub);
+      removeOldMarkers(0, people_marker_next_id, people_pub);
       people_marker_next_id = 0;
     }
     
     if (tracking_zone_next_marker_id != 0) {
-      removeOldMarkers(tracking_zone_next_marker_id, tracking_zone_pub);
+      removeOldMarkers(0, tracking_zone_next_marker_id, tracking_zone_pub);
       tracking_zone_next_marker_id = 0;
     }
   }
@@ -1888,23 +1952,71 @@ public:
     lastSeenPeoplePositions.pop_back();
   }
   
+  bool isPointNearToLimits(Point p)
+  {
+    return (std::abs(p.x - x_upper_limit) > 0.1 || 
+	    std::abs(p.y - y_upper_limit) > 0.1 || 
+	    std::abs(p.x - x_lower_limit) > 0.1 || 
+	    std::abs(p.y - y_lower_limit) > 0.1);
+  }
+  
   void updateLastSeenPeoplePositions()
   {
     for (int i = 0; i < lastSeenPeoplePositions.size(); i++)
     {
-      if (std::get<0>(lastSeenPeoplePositions[i]) * frequency < 5.0) 
+      if (std::get<0>(lastSeenPeoplePositions[i]) * frequency > 5.0
+	|| (std::get<0>(lastSeenPeoplePositions[i]) * frequency > 1.0 
+	    && isPointNearToLimits(std::get<2>(lastSeenPeoplePositions[i])))) 
       { 
-	std::get<0>(lastSeenPeoplePositions[i])++;
+	int pId = std::get<1>(lastSeenPeoplePositions[i]);
+	std::map<int, visualization_msgs::Marker>::iterator it = paths.find(pId);
+	if (it != paths.end())
+	{
+	  removeOldMarkers(pId, pId + 1, paths_publisher);
+	  paths.erase(it);
+	}
+	removeLastSeenPeoplePosition(i);
       } 
       else
       {
-	removeLastSeenPeoplePosition(i);
+	std::get<0>(lastSeenPeoplePositions[i])++;
       }
     }
   }
+  
+  void updatePaths()
+  {
+    visualization_msgs::MarkerArray ma;
+//     std::string s = "";
+    std::map<int, visualization_msgs::Marker>::iterator it = paths.begin();
+    for (; it != paths.end(); it++)
+    {
+//       ROS_WARN("pub markers vor if: %d", (int) it->second.points.size());
+      if (it->second.points.size() >= 80) 
+      {
+	std::rotate(it->second.points.begin(), it->second.points.begin() + 1, it->second.points.end());
+	it->second.points.pop_back();
+      }
+//       if (it->second.points.size() > 1) 
+//       {
+	ma.markers.push_back(it->second);
+//       }
+//       for (int i = 0; i < it->second.points.size(); i++)
+//       {
+// 	s += "(" + std::to_string(it->second.points[i].x) + ", " + std::to_string(it->second.points[i].y) + ") "; 
+//       }
+//       s += "\n";
+//       ROS_WARN("pub markers nach if if: %d, points: %s", (int) it->second.points.size(), s.c_str());
+    }
+    
+    paths_publisher.publish(ma);
+  }
+  
+
 
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
+    updatePaths();
     updateLastSeenPeoplePositions();
     for (int i = 0; i < lastSeenPeoplePositions.size(); i++)
     {
@@ -1992,7 +2104,7 @@ public:
     }
     visLegs();
     findPeople();
-    vis_people();
+    vis_people(cloudXYZ.header);
     vis_tracking_zones();
     ros::Time currtime=ros::Time::now();
     ros::Duration diff=currtime-lasttime;
