@@ -138,6 +138,9 @@ private:
   double ellipse_rx;
   double ellipse_ry;
   
+  double ref_point_x;
+  double ref_point_y;
+  
   double waitForTrackingZoneReset;
   
   double frequency;
@@ -186,6 +189,8 @@ public:
     y_lower_limit_dynamic = y_lower_limit;
     y_upper_limit_dynamic = y_upper_limit;
     nh_.param("leg_radius", leg_radius, 0.1);
+    nh_.param("ref_point_x", ref_point_x, -0.9);
+    nh_.param("ref_point_y", ref_point_y, 0.0);
     nh_.param("min_observations", min_observations, 4);
     nh_.param("max_dist_btw_legs", max_dist_btw_legs, 0.8);
     nh_.param("z_coordinate", z_coordinate, 0.178);
@@ -226,7 +231,7 @@ public:
     legs_and_vel_direction_publisher = nh_.advertise<visualization_msgs::MarkerArray>("legs_and_vel_direction", 300);
     tracking_area_pub = nh_.advertise<visualization_msgs::Marker>("tracking_area", 300);
     people_pub = nh_.advertise<visualization_msgs::MarkerArray>("people", 300);
-//     marker_pub = nh_.advertise<visualization_msgs::Marker>("line_strip", 10);
+    marker_pub = nh_.advertise<visualization_msgs::Marker>("line_strip", 10);
 //     cov_marker_pub = nh_.advertise<visualization_msgs::MarkerArray>("cov_ellipses", 10);
     
 //     bounding_box_pub = nh_.advertise<visualization_msgs::Marker>("bounding_box", 300);
@@ -392,6 +397,38 @@ public:
 	ROS_DEBUG("Filtering: Too small number of points in the resulting PointCloud!");
 	return false;
       }
+      
+      if (got_map)
+      {
+	geometry_msgs::TransformStamped transformStamped;
+	geometry_msgs::PointStamped point_in, point_out;
+	point_in.header.frame_id = in.header.frame_id;
+	point_in.header.stamp = ros::Time::now();
+	
+	try{
+	  transformStamped = tfBuffer.lookupTransform(global_map.header.frame_id, point_in.header.frame_id, ros::Time(0));
+	}
+	catch (tf2::TransformException &ex) {
+	  ROS_WARN("Failure to lookup the transform for a point! %s\n", ex.what());
+	  return false;
+	}
+	
+	
+	for (int i = 0; i < outlier_filtered.points.size(); i++) 
+	{
+	  point_in.point.x = outlier_filtered.points[i].x; 
+	  point_in.point.y = outlier_filtered.points[i].y;
+	  
+	  tf2::doTransform(point_in, point_out, transformStamped);
+	  
+	  double in_free_space = how_much_in_free_space(point_out.point.x, point_out.point.y);
+	  
+	  if (in_free_space <= in_free_space_threshold) 
+	  {
+	    out.points.push_back(outlier_filtered.points[i]);
+	  } 
+	}
+      }
     }
     else
     {
@@ -403,37 +440,18 @@ public:
       }
     }
     
-    if (with_map && got_map) {
-      
-      geometry_msgs::TransformStamped transformStamped;
-      geometry_msgs::PointStamped point_in, point_out;
-      point_in.header.frame_id = in.header.frame_id;
-      point_in.header.stamp = ros::Time::now();
-      
-      try{
-	transformStamped = tfBuffer.lookupTransform(global_map.header.frame_id, point_in.header.frame_id, ros::Time(0));
-      }
-      catch (tf2::TransformException &ex) {
-	ROS_WARN("Failure to lookup the transform for a point! %s\n", ex.what());
-	return false;
-      }
-      
-      
-      for (int i = 0; i < outlier_filtered.points.size(); i++) 
-      {
-	point_in.point.x = outlier_filtered.points[i].x; 
-	point_in.point.y = outlier_filtered.points[i].y;
-	
-	tf2::doTransform(point_in, point_out, transformStamped);
-	
-	double in_free_space = how_much_in_free_space(point_out.point.x, point_out.point.y);
-	
-	if (in_free_space <= in_free_space_threshold) 
-	{
-	  out.points.push_back(outlier_filtered.points[i]);
-	} 
-      }
-    }
+//     if (out.points.size() < 3) { return true; }
+//     
+//     PointCloud temp;
+//     temp.header = out.header;
+//     Point ref_point;
+//     ref_point.x = -0.9;
+//     ref_point.y = 0.;
+//     Point p_with_min_dist_1, p_with_min_dist_2; 
+//     for (Point& p : out)
+//     {
+//        
+//     }
     
     return true;
   }
@@ -566,10 +584,14 @@ public:
 	
 	if (legs.size() == 2)
 	{
-	  if (distanceBtwTwoPoints(legs[0].getPos(), legs[1].getPos()) <= 0.35)
+// 	  if (distanceBtwTwoPoints(legs[0].getPos(), legs[1].getPos()) < 0.3)
+// 	  {
+// 	    legs[0].predict();
+// 	    legs[1].predict();
+// 	  }
+	  if (legs[i].getOccludedAge() < 3)
 	  {
-	    legs[0].predict();
-	    legs[1].predict();
+	    legs[i].predict();
 	  }
 	}
 	else if (legs.size() == 1)
@@ -578,12 +600,23 @@ public:
 	}
 	
 	if (legs[i].getPos().x > x_upper_limit || legs[i].getPos().y > y_upper_limit || 
-	  legs[i].getPos().x < x_lower_limit || legs[i].getPos().y < y_lower_limit)
+	  legs[i].getPos().x < x_lower_limit || legs[i].getPos().y < y_lower_limit 
+	  )
 	{
 	  toReset = true;
+	  break;
 	}
       }
     }
+    
+    if (legs.size() == 2)
+    {
+      if (distanceBtwTwoPoints(legs[0].getPos(), legs[1].getPos()) > max_dist_btw_legs)
+      {
+	toReset = true;
+      }
+    }
+    
     
     if (toReset) 
     {
@@ -595,14 +628,17 @@ public:
     
     if (cluster_centroids.points.size() == 0) 
     { 
-//       for (int i = 0; i < legs.size(); i++)
-//       {
-// 	legs[i].missed();
-//       }
+      for (int i = 0; i < legs.size(); i++)
+      {
+	legs[i].missed();
+      }
       return; 
     }
     
+    ROS_INFO("1");
+    
     if (cluster_centroids.points.size() == 1) {
+    ROS_INFO("2");
       Point p = cluster_centroids.points[0];
       double min_dist = max_cost;
       int index = -1;
@@ -611,31 +647,62 @@ public:
 	double mahalanobis_dist = std::sqrt((std::pow((p.x - legs[i].getPos().x), 2) +
 	  std::pow((p.y - legs[i].getPos().y), 2)) / cov);
 	double euclid_dist = distanceBtwTwoPoints(p, legs[i].getPos());
+	ROS_INFO("one new point: (%f, %f), for i = %d, legId = %d, cov = %f, maha = %f, euclid = %f, index = %d, min_dis = %f",
+		 p.x, p.y, i, legs[i].getLegId(), cov, mahalanobis_dist, euclid_dist, index, min_dist);
+	if (legs.size() == 2)
+	{
+	  if ((i == 0 && distanceBtwTwoPoints(p, legs[1].getPos()) <= 0.05)
+	    || (i == 1 && distanceBtwTwoPoints(p, legs[0].getPos()) <= 0.05))
+	  {
+	    continue;
+	  }
+	}
 	if (mahalanobis_dist < min_dist && euclid_dist < 0.25)
 	{
 	  index = i;
 	  min_dist = mahalanobis_dist;
 	}
       }
-      if (index = 0)  
-      { 
-	legs[0].update(p);
-// 	legs[1].missed();
-      }	
-      else if (index == 1)
+      ROS_INFO("index = %d", index);
+      if (index != -1)
       {
-	legs[1].update(p);
-// 	legs[0].missed();
+	ROS_INFO("one new point: (%f, %f), legId = %d, index = %d, min_dis = %f",
+		p.x, p.y, legs[index].getLegId(), index, min_dist);
+	legs[index].update(p);
+	
+	// clear cloud 
+	cluster_centroids.points.clear();
+	
+	if (legs.size() == 2)
+	{
+	  legs[1 - index].missed();
+	}
       }
+//       if (index = 0)  
+//       { 
+// 	legs[0].update(p);
+// // 	legs[1].missed();
+//       }	
+//       else if (index == 1)
+//       {
+// 	legs[1].update(p);
+// // 	legs[0].missed();
+//       }
     } else if (legs.size() == 1) {
+    ROS_INFO("3");
       double min_dist = max_cost;
       int index = -1;
       for (int i = 0; i < cluster_centroids.points.size(); i++) {
-	double cov = legs[i].getMeasToTrackMatchingCov();
-	double mahalanobis_dist = std::sqrt((std::pow((cluster_centroids.points[i].x - legs[i].getPos().x), 2) +
-	  std::pow((cluster_centroids.points[i].y - legs[i].getPos().y), 2)) / cov);
-	double euclid_dist = distanceBtwTwoPoints(cluster_centroids.points[i], legs[i].getPos());
-	if (mahalanobis_dist < min_dist && euclid_dist < 0.25)
+	double cov = legs[0].getMeasToTrackMatchingCov();
+	double mahalanobis_dist = std::sqrt((std::pow((cluster_centroids.points[i].x - legs[0].getPos().x), 2) +
+	  std::pow((cluster_centroids.points[i].y - legs[0].getPos().y), 2)) / cov);
+	double euclid_dist = distanceBtwTwoPoints(cluster_centroids.points[i], legs[0].getPos());
+	if (euclid_dist <= 0.05)
+	{
+	  index = i;
+	  break;
+	}
+	if (mahalanobis_dist < min_dist && euclid_dist < 0.3)
 	{
 	  index = i;
 	  min_dist = mahalanobis_dist;
@@ -644,23 +711,50 @@ public:
       if (index != -1)  
       { 
 	legs[0].update(cluster_centroids.points[index]);
+	cluster_centroids.points.erase(cluster_centroids.points.begin() + index);
       }	
+      else
+      {
+	legs[0].missed();
+      }
     } else if (legs.size() == 2 && cluster_centroids.points.size() > 1) {
       
       double total_cost = max_cost;
       double fst_cov = legs[0].getMeasToTrackMatchingCov();
       double snd_cov = legs[1].getMeasToTrackMatchingCov();
       int fst_index = -1, snd_index = -1;
+      int best_fst_index = -1, best_snd_index = -1;
       
       for (int i = 0; i < cluster_centroids.points.size(); i++) {
-	double euclid_dist = distanceBtwTwoPoints(cluster_centroids.points[i], legs[0].getPos());
+	double fst_euclid_dist = distanceBtwTwoPoints(cluster_centroids.points[i], legs[0].getPos());
 // 	if (euclid_dist > 0.25 && cluster_centroids.points.size() ) { continue; }
-	double fst_cost = std::sqrt((std::pow((cluster_centroids.points[i].x - legs[0].getPos().x), 2) +
-	  std::pow((cluster_centroids.points[i].y - legs[0].getPos().y), 2)) / fst_cov);
+	double fst_cost;
+	if (fst_euclid_dist <= 0.05)
+	{
+	  fst_cost = 0.;
+	  best_fst_index = i;
+	}
+	else
+	{
+	  fst_cost = std::sqrt((std::pow((cluster_centroids.points[i].x - legs[0].getPos().x), 2) +
+	    std::pow((cluster_centroids.points[i].y - legs[0].getPos().y), 2)) / fst_cov);
+	}
 	for (int j = 0; j < cluster_centroids.points.size(); j++) {
 	  if (i == j) { continue; }
-	  double snd_cost = std::sqrt((std::pow((cluster_centroids.points[j].x - legs[i].getPos().x), 2) +
-	    std::pow((cluster_centroids.points[j].y - legs[i].getPos().y), 2)) / snd_cov);
+	  double snd_euclid_dist = distanceBtwTwoPoints(cluster_centroids.points[j], legs[1].getPos());
+	  double snd_cost;
+	  
+	  if (snd_euclid_dist <= 0.05)
+	  {
+	    snd_cost = 0.;
+	    best_snd_index = j;
+	  }
+	  else
+	  {
+	    snd_cost = std::sqrt((std::pow((cluster_centroids.points[j].x - legs[1].getPos().x), 2) +
+		std::pow((cluster_centroids.points[j].y - legs[1].getPos().y), 2)) / snd_cov);
+	  }
+	  
 	  if (fst_cost + snd_cost < total_cost) {
 	    total_cost = fst_cost + snd_cost;
 	    fst_index = i;
@@ -669,10 +763,36 @@ public:
 	}
       }
       
-      if (fst_index == -1 || snd_index == -1) { return; }
+      //if (fst_index == -1 || snd_index == -1) { return; }
       
-      legs[0].update(cluster_centroids.points[fst_index]);
-      legs[1].update(cluster_centroids.points[snd_index]);
+      ROS_WARN("fst_index: %d, best_fst_index: %d, snd_index: %d, best_snd_index: %d",
+	       fst_index, best_fst_index, snd_index, best_snd_index);
+      
+      if (fst_index != -1)
+      {
+	legs[0].update(cluster_centroids.points[fst_index]);
+      }
+      else if (best_fst_index != -1)
+      {
+	legs[0].update(cluster_centroids.points[best_fst_index]);
+      }
+      else
+      {
+	legs[0].missed();
+      }
+      
+      if (snd_index != -1)
+      {
+	legs[1].update(cluster_centroids.points[snd_index]);
+      }
+      else if (best_snd_index != -1)
+      {
+	legs[1].update(cluster_centroids.points[best_snd_index]);
+      }
+      else
+      {
+	legs[1].missed();
+      }
     } 
     
     
@@ -711,13 +831,41 @@ public:
       }
     }
 
-
-    if (legs.size() < 2) {
-      for (Point& p : cluster_centroids.points)
+    if (legs.size() == 2) { return; }
+    
+    int used_point_index = -1;
+    Point ref_point;
+    ref_point.x = ref_point_x; 
+    ref_point.y = ref_point_y;
+    
+    while (legs.size() < 2) {
+      double min_dist = max_cost;
+      int index = -1;
+      for (int i = 0; i < cluster_centroids.points.size(); i++)
       {
-	legs.push_back(initLeg(p));
-	if (legs.size() >= 2) { break; }
+	if (i == used_point_index) { continue; }
+	double dist = distanceBtwTwoPoints(ref_point, cluster_centroids.points[i]);
+	ROS_WARN("i: %d, index: %d, used_point_index: %d, new point: (%f, %f), dist to point (%f, %f): %f, min_dist: %f",
+		 i, index, used_point_index, cluster_centroids.points[i].x, cluster_centroids.points[i].y, ref_point.x, ref_point.y, dist, min_dist);
+	if (dist < min_dist && dist < 0.3)
+	{
+	  index = i;
+	  min_dist = dist;
+	}
       }
+      if (index != -1) 
+      {
+	used_point_index = index;
+	legs.push_back(initLeg(cluster_centroids.points[index]));
+      } 
+      else
+      {
+	// there is no valid point in cloud
+	break;
+      }
+      
+      // cloud has only one point
+      if (used_point_index != -1 && cluster_centroids.points.size() <= 1) { break; }
     }
   }
   
@@ -2063,6 +2211,58 @@ public:
     paths_publisher.publish(ma);
   }
   
+  void pub_triangle()
+  {
+    visualization_msgs::Marker line_strip;
+    line_strip.header.frame_id = transform_link;
+    line_strip.header.stamp = ros::Time();
+    line_strip.ns = nh_.getNamespace();
+    line_strip.action = visualization_msgs::Marker::ADD;
+    line_strip.pose.orientation.w = 1.0;
+    line_strip.id = 0;
+    line_strip.scale.x = 0.03;
+    line_strip.color.a = 1.0;
+    line_strip.color.r = getRandomNumberFrom0To1();
+    line_strip.color.g = getRandomNumberFrom0To1();
+    line_strip.color.b = getRandomNumberFrom0To1();
+    line_strip.type = visualization_msgs::Marker::LINE_STRIP;
+    geometry_msgs::Point p;
+    p.x = 0.;
+    p.y = 0.;
+    line_strip.points.push_back(p);
+    
+    bool is_fst_leg = distanceBtwTwoPoints(p.x, p.y, legs[0].getPos().x, legs[0].getPos().y) <= distanceBtwTwoPoints(p.x, p.y, legs[1].getPos().x, legs[1].getPos().y);
+//     ROS_INFO("is_fst_leg: %d, 
+    if (is_fst_leg) { p.x = legs[0].getPos().x; p.y = legs[0].getPos().y; }
+    else { p.x = legs[1].getPos().x; p.y = legs[1].getPos().y; }
+    p.x -= distanceBtwTwoPoints(legs[0].getPos(), legs[1].getPos());
+    
+    double to_add = 0.;
+    if (is_fst_leg)
+    {
+       to_add = 0.07 * (1 + distanceBtwTwoPoints(legs[0].getPos(), legs[1].getPos()) / calculateNorm(legs[0].getPos()));
+    }
+    else
+    {
+      to_add = 0.07 * (1 + distanceBtwTwoPoints(legs[0].getPos(), legs[1].getPos()) / calculateNorm(legs[1].getPos()));
+    }
+    
+    p.y -= to_add;
+    
+    
+    
+//     p.x = -1.2; p.y = -0.7;
+    line_strip.points.push_back(p);
+    if (is_fst_leg) { p.x = legs[1].getPos().x; p.y = legs[1].getPos().y; }
+    else { p.x = legs[0].getPos().x; p.y = legs[0].getPos().y; }
+    p.x -= distanceBtwTwoPoints(legs[0].getPos(), legs[1].getPos());
+    p.y += to_add;
+//     p.x = -1.2; p.y = 0.7;
+    line_strip.points.push_back(p);
+    p.x = 0.; p.y = 0.;
+    line_strip.points.push_back(p);
+    marker_pub.publish(line_strip);
+  }
 
 
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
@@ -2161,19 +2361,23 @@ public:
       double confidence;
       if (legs[0].getCurrentState(current_state))
       {
-	confidence = legs[0].hasPair() * std::max(0., (1 - 0.15 * legs[0].getOccludedAge()));
+	confidence = legs[0].hasPair() * std::max(0., (1 - 0.11 * legs[0].getOccludedAge()));
 	current_state.push_back(confidence);
 	pub_leg_posvelacc(current_state, 0);
       }
       current_state.clear();
       if (legs[1].getCurrentState(current_state))
       {
-	confidence = legs[1].hasPair() * std::max(0., (1 - 0.15 * legs[1].getOccludedAge()));
+	confidence = legs[1].hasPair() * std::max(0., (1 - 0.11 * legs[1].getOccludedAge()));
 	current_state.push_back(confidence);
 	pub_leg_posvelacc(current_state, 1);
       }
     }
     vis_people(cloudXYZ.header);
+    if (isOnePersonToTrack && legs.size() == 2)
+    {
+      pub_triangle();
+    }
     vis_tracking_zones();
     ros::Time currtime=ros::Time::now();
     ros::Duration diff=currtime-lasttime;

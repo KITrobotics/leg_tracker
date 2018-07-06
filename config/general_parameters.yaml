@@ -1,6 +1,7 @@
 #scan_topic: /base_laser_rear/scan
 scan_topic: /scan_unified
 #scan_topic: /sick_s300/scan_in
+#scan_topic: /scan_rear_raw
 
 frequency: 0.05
 

@@ -115,7 +115,10 @@ public:
 
   void missed()
   {
-    occluded_age++;
+    if (occluded_age <= occluded_dead_age)
+    {
+      occluded_age++;
+    }
     observations = 0;
   }
   
