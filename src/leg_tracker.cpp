@@ -318,9 +318,10 @@ public:
     return true;
   }
   
-  void pub_leg_posvelacc(std::vector<double>& in, bool isLeft)
+  void pub_leg_posvelacc(std::vector<double>& in, bool isSnd)
   {
-    if (in.size() != 6 + 1) { ROS_ERROR("Invalid vector of leg posvelacc!"); return; }
+    // 3 values for legId peopleId and confidence
+    if (in.size() != 6 + 3) { ROS_ERROR("Invalid vector of leg posvelacc!"); return; }
 
     std_msgs::Float64MultiArray msg;
 
@@ -328,13 +329,13 @@ public:
     msg.layout.dim.push_back(std_msgs::MultiArrayDimension());
     msg.layout.dim[0].size = in.size();
     msg.layout.dim[0].stride = 1;
-    msg.layout.dim[0].label = "posXY_velXY_accXY_confidence";
+    msg.layout.dim[0].label = "posXY_velXY_accXY_lId_pId_confidence";
 
     // copy in the data
     msg.data.clear();
     msg.data.insert(msg.data.end(), in.begin(), in.end());
 
-    if (isLeft) { pos_vel_acc_fst_leg_pub.publish(msg); }
+    if (isSnd) { pos_vel_acc_fst_leg_pub.publish(msg); }
     else { pos_vel_acc_snd_leg_pub.publish(msg); }
   }
 
@@ -2359,18 +2360,16 @@ public:
     {
       std::vector<double> current_state;
       double confidence;
-      if (legs[0].getCurrentState(current_state))
+      for (int i = 0; i < legs.size(); i++)
       {
-	confidence = legs[0].hasPair() * std::max(0., (1 - 0.11 * legs[0].getOccludedAge()));
-	current_state.push_back(confidence);
-	pub_leg_posvelacc(current_state, 0);
-      }
-      current_state.clear();
-      if (legs[1].getCurrentState(current_state))
-      {
-	confidence = legs[1].hasPair() * std::max(0., (1 - 0.11 * legs[1].getOccludedAge()));
-	current_state.push_back(confidence);
-	pub_leg_posvelacc(current_state, 1);
+	if (legs[i].getCurrentState(current_state))
+	{
+	  current_state.push_back(legs[i].getLegId());
+	  current_state.push_back(legs[i].getPeopleId());
+	  confidence = legs[i].hasPair() * std::max(0., (1 - 0.11 * legs[i].getOccludedAge()));
+	  current_state.push_back(confidence);
+	  pub_leg_posvelacc(current_state, i);
+	}
       }
     }
     vis_people(cloudXYZ.header);
