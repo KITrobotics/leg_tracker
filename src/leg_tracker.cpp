@@ -1227,6 +1227,13 @@ public:
 		l.getPos().x, 
 		l.getPos().y, 
 		getPeopleMarkerNextId()));
+	      
+// 	      double start_x = 0.5 * (legs[i].getPos().x + legs[j].getPos().x);
+// 	      double start_y = 0.5 * (legs[i].getPos().x + legs[j].getPos().x);
+// 	      double end_x = -0.1 * (legs[i].getPos().x + l.getPos().x);
+// 	      double end_y = -0.1 * (legs[i].getPos().y + l.getPos().y);
+// 	      ma_people.markers.push_back(getArrowMarker(0.0, 0.0, end_x, end_y, getPeopleMarkerNextId()));
+	      
 	      break;
 	    }
 	  }
@@ -1242,6 +1249,11 @@ public:
 		  legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y);
 	      ma_people.markers.push_back(getOvalMarkerForTwoPoints(id, legs[i].getPos().x,
 		  legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, getPeopleMarkerNextId()));
+// 	      double start_x = 0.5 * (legs[i].getPos().x + legs[j].getPos().x);
+// 	      double start_y = 0.5 * (legs[i].getPos().x + legs[j].getPos().x);
+// 	      double end_x = legs[i].getPos().x + legs[j].getPos().x;
+// 	      double end_y = legs[i].getPos().y + legs[j].getPos().y;
+// 	      ma_people.markers.push_back(getArrowMarker(0., 0., -0.3 * end_x, -0.3 * end_y, getPeopleMarkerNextId()));
 	      break;
 	    }
 	  }
