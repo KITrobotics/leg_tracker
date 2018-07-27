@@ -54,7 +54,7 @@ catkin_package(
   INCLUDE_DIRS include
 #   LIBRARIES kalman
   CATKIN_DEPENDS std_msgs
-  DEPENDS Eigen3
+  DEPENDS EIGEN3
 )
 
 # add_library(kalman src/kalman_filter.cpp)

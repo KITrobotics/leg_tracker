@@ -4,6 +4,7 @@ isBoundingBoxTracking: false
 #with_map: true
 with_map: false
 
+# average point where the user stands
 ref_point_x: -0.9
 ref_point_y: 0.0
 

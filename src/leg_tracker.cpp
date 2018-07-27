@@ -161,6 +161,12 @@ private:
   
   std::map<int, visualization_msgs::Marker> paths;
   
+  int checked, how_much_times_to_check;
+  
+  std::pair<int, int> left_right;
+  double conf_left_right;
+  std::pair<int, int> ij_or_ji;
+  
 
 public:
   ros::NodeHandle nh_;
@@ -175,6 +181,9 @@ public:
   void init()
   { 
     std::srand(1);
+    resetLeftRight();
+//     one_leg_counter.resize(3);
+//     another_leg_counter.resize(3);
     
     nh_.param("scan_topic", scan_topic, std::string("/scan_unified"));
     nh_.param("frequency", frequency, 0.05);
@@ -226,8 +235,8 @@ public:
     global_map_sub = nh_.subscribe<nav_msgs::OccupancyGrid>(global_map_topic, 10, &LegDetector::globalMapCallback, this);
 //     sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 300);
 //     pcl_cloud_publisher = nh_.advertise<PointCloud> ("scan2pclCloud", 300);
-    pos_vel_acc_fst_leg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_fst_leg", 300);
-    pos_vel_acc_snd_leg_pub = nh_.advertise<std_msgs::Float64MultiArray>("pos_vel_acc_snd_leg", 300);
+    pos_vel_acc_fst_leg_pub = nh_.advertise<std_msgs::Float64MultiArray>("posXY_velXY_accXY_lId_pId_conf_fst_leg", 300);
+    pos_vel_acc_snd_leg_pub = nh_.advertise<std_msgs::Float64MultiArray>("posXY_velXY_accXY_lId_pId_conf_snd_leg", 300);
     legs_and_vel_direction_publisher = nh_.advertise<visualization_msgs::MarkerArray>("legs_and_vel_direction", 300);
     tracking_area_pub = nh_.advertise<visualization_msgs::Marker>("tracking_area", 300);
     people_pub = nh_.advertise<visualization_msgs::MarkerArray>("people", 300);
@@ -318,6 +327,17 @@ public:
     return true;
   }
   
+  /*
+   * Position (x, y), Velocity (x, y), Accelaration(x, y), 
+   * leg id, people id, 
+   * confidence // confidence = legs[i].hasPair() * std::max(0., (1 - 0.11 * legs[i].getOccludedAge()))
+   * Left = 1.0 or right 0.0 (isLeft)
+   * conf_left_right // conf_left_right = std::min(1., conf_left_right + 0.1);   // velocity > 0.2 and distance is reduced to plattform
+   * angle = atan2 (y, x) for every leg (y negativ and x egal = a-,   y+ and x egal = angle positiv)
+   * 
+   * 
+   * 
+   */
   void pub_leg_posvelacc(std::vector<double>& in, bool isSnd)
   {
     // 3 values for legId peopleId and confidence
@@ -472,8 +492,18 @@ public:
     for (Leg& l : vec)
     {
       double confidence = l.hasPair() * std::max(0., (1 - 0.15 * l.getOccludedAge()));
-      ROS_INFO("legId: %d, peopleId: %d, confidence: %f, pos: (%f, %f), observations: %d, hasPair: %d, missed: %d, dist_traveled: %f",
-      l.getLegId(), l.getPeopleId(), confidence, l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair(), l.getOccludedAge(), l.getDistanceTravelled());
+      std::string left_or_right_leg = "unknown"; 
+      if (left_right.first != -1)
+      {
+	left_or_right_leg = (left_right.first == l.getLegId() ? "left" : "right");
+      }
+      
+      double angle = atan2(l.getPos().y, l.getPos().x);
+//       double angle = 
+      
+      
+      ROS_INFO("legId: %d, peopleId: %d, confidence: %f, pos: (%f, %f), observations: %d, hasPair: %d, missed: %d, dist_traveled: %f, %s leg, conf_left_right: %f, angle: %f",
+      l.getLegId(), l.getPeopleId(), confidence, l.getPos().x, l.getPos().y, l.getObservations(), l.hasPair(), l.getOccludedAge(), l.getDistanceTravelled(), left_or_right_leg.c_str(), conf_left_right, angle);
     }
   }
   
@@ -511,8 +541,14 @@ public:
     {
       double pos_x = l.getPos().x;
       double pos_y = l.getPos().y;
-      ma_leg.markers.push_back(getArrowMarker(pos_x, pos_y,
-	       pos_x + 0.5 * l.getVel().x, pos_y + 0.5 * l.getVel().y, getNextLegsMarkerId()));
+      visualization_msgs::Marker m = getArrowMarker(pos_x, pos_y,
+	       pos_x + 0.5 * l.getVel().x, pos_y + 0.5 * l.getVel().y, getNextLegsMarkerId());
+      if (left_right.first == l.getLegId())
+      {
+	m.color.r = 0.;
+	m.color.b = 1.0;
+      }
+      ma_leg.markers.push_back(m);
     }
     legs_and_vel_direction_publisher.publish(ma_leg);
   }
@@ -549,6 +585,7 @@ public:
     marker.scale.y = 0.1;
     marker.scale.z = 0.2;
     marker.color.a = 1.0; // Don't forget to set the alpha!
+    marker.color.r = 1.0;
     marker.color.r = 1.0;
     return marker;
   }
@@ -623,6 +660,7 @@ public:
     {
       legs.clear();
       resetTrackingZone();
+      resetLeftRight();
       return;
     }
     
@@ -1195,7 +1233,152 @@ public:
     return getOvalMarker(id, x, y, orientation_x, orientation_y, orientation_z, orientation_w,
       scale_x, scale_y, r, g, b);
   }
-
+  
+  
+  void checkIfLeftOrRight(int i, int j)
+  {
+    if (legs[i].getPos().y <= legs[j].getPos().y)
+    {
+      // leg i is the right leg =^ ji
+      ij_or_ji.second++;
+    }
+    else
+    {
+      ij_or_ji.first++;
+    }
+    ROS_WARN("lr or ij: %d, rl or ji: %d", ij_or_ji.first, ij_or_ji.second);
+    
+    ROS_WARN("i: %d, j: %d, i_id: %d, j_id: %d", i, j, legs[i].getLegId(), legs[j].getLegId());
+  // 	      if (checked < how_much_times_to_check)
+  // 	      {
+      // if velocity of one leg is greater than 0.2 m/s and velocity of another leg is smaller than 0.2 m/s
+    double fst_vel = calculateNorm(legs[i].getVel());
+    double snd_vel = calculateNorm(legs[j].getVel());
+    int moving_leg = -1, unmoving_leg = -1;
+    ROS_WARN("fst_vel: %f, snd_vel: %f,  before  moving_leg: %d, unmoving_leg: %d", fst_vel, snd_vel, moving_leg, unmoving_leg);
+    
+    if (fst_vel > 0.2 && snd_vel < 0.2)
+    {
+      moving_leg = i; 
+      unmoving_leg = j;
+    } 
+    else if (fst_vel < 0.2 && snd_vel > 0.2)
+    {
+      moving_leg = j;
+      unmoving_leg = i;
+    }
+    ROS_WARN("fst_vel: %f, snd_vel: %f,  after  moving_leg: %d, unmoving_leg: %d", fst_vel, snd_vel, moving_leg, unmoving_leg);
+    
+    if (left_right.first == -1)
+    {
+      if (legs[i].getPos().y <= legs[j].getPos().y)
+      {
+	// leg i is the right leg =^ ji
+	left_right = std::make_pair(legs[j].getLegId(), legs[i].getLegId());
+      }
+      else
+      {
+	left_right = std::make_pair(legs[i].getLegId(), legs[j].getLegId());
+      }
+    }
+    else if (moving_leg != -1 && unmoving_leg != -1)
+    {
+      
+      // determine if the moving leg is right or left from unmoving leg
+// 		  double dot_product = legs[moving_leg].getPos().x * legs[unmoving_leg].getPos().x + legs[moving_leg].getPos().y * legs[unmoving_leg].getPos().y;
+// 		  double pos_norm_1 = calculateNorm(legs[moving_leg].getPos());
+// 		  double pos_norm_2 = calculateNorm(legs[unmoving_leg].getPos());
+// 		  double angle = 0.;
+// 		  if (pos_norm_1 != 0 && pos_norm_2 != 0) 
+// 		  { 
+// // 		    angle = acos(dot_product / (pos_norm_1 * pos_norm_2));
+// 		    
+// 		  }
+      double Ax = legs[moving_leg].getPos().x;
+      double Ay = legs[moving_leg].getPos().y;
+      double Bx = legs[moving_leg].getPos().x + legs[moving_leg].getVel().x;
+      double By = legs[moving_leg].getPos().y + legs[moving_leg].getVel().y;
+      
+      
+// 		  double X = legs[unmoving_leg].getPos().x;
+// 		  double Y = legs[unmoving_leg].getPos().y;
+// 		  double temp = (Bx - Ax) * (Y - Ay) - (By - Ay) * (X - Ax);
+      
+      
+      double dist_to_pos = distanceBtwTwoPoints(0., 0., Ax, Ay);
+      double dist_to_vel = distanceBtwTwoPoints(0., 0., Bx, By);
+      
+      ROS_WARN("Ax: %f, Ay: %f, Bx: %f, By: %f, dist_to_pos: %f, dist_to_vel: %f", Ax, Ay, Bx, By, dist_to_pos, dist_to_vel);
+      
+      ROS_WARN("left_right before: %d, %d", left_right.first, left_right.second);
+      
+      if (dist_to_pos > dist_to_vel)
+      {
+	ROS_WARN("dist_to_pos (%f) > dist_to_vel (%f)", dist_to_pos, dist_to_vel);
+	// moving leg is the right leg
+	if (legs[moving_leg].getPos().y <= legs[unmoving_leg].getPos().y)
+	{
+	ROS_WARN("legs[moving_leg].getPos().y (%f)  <= legs[unmoving_leg].getPos().y (%f)", legs[moving_leg].getPos().y, legs[unmoving_leg].getPos().y);
+	  // check if this "right" leg is temporary on the right side
+	  if ((moving_leg < unmoving_leg && ij_or_ji.first < ij_or_ji.second) || 
+	    (moving_leg > unmoving_leg && ij_or_ji.first > ij_or_ji.second))
+	  {
+	    ROS_WARN("if moving_leg < unmoving_leg && ij_or_ji.first < ij_or_ji.second) || (moving_leg > unmoving_leg && ij_or_ji.first > ij_or_ji.second)), wo------ moving_leg: %d, unmoving_leg: %d, ij_or_ji.first: %d, ij_or_ji.second: %d", moving_leg, unmoving_leg, ij_or_ji.first, ij_or_ji.second);
+	    if (left_right.first != legs[unmoving_leg].getLegId())
+	    {
+	      left_right = std::make_pair(legs[unmoving_leg].getLegId(), legs[moving_leg].getLegId());
+	      conf_left_right = 0.1;
+	    }
+	    else
+	    {
+	      conf_left_right = std::min(1., conf_left_right + 0.1);
+	    }
+	  }
+	}
+	else
+	{
+	  // moving leg is now on the left side -> if moving_leg < unmoving_leg then i else j
+	  if ((moving_leg < unmoving_leg && ij_or_ji.first > ij_or_ji.second) || 
+	    (moving_leg > unmoving_leg && ij_or_ji.first < ij_or_ji.second))
+	  {
+	    ROS_WARN("if ((moving_leg < unmoving_leg && ij_or_ji.first > ij_or_ji.second) || (moving_leg > unmoving_leg && ij_or_ji.first < ij_or_ji.second)), wo------ moving_leg: %d, unmoving_leg: %d, ij_or_ji.first: %d, ij_or_ji.second: %d", moving_leg, unmoving_leg, ij_or_ji.first, ij_or_ji.second);
+	    if (left_right.first != legs[moving_leg].getLegId())
+	    {
+	      left_right = std::make_pair(legs[moving_leg].getLegId(), legs[unmoving_leg].getLegId());
+	      conf_left_right = 0.1;
+	    }
+	    else
+	    {
+	      conf_left_right = std::min(1., conf_left_right + 0.1);
+	    }
+	  }
+	}
+      }
+      
+      ROS_WARN("left_right after: %d, %d", left_right.first, left_right.second);
+	
+      
+      
+      
+      
+  // 		  if (legs[moving_leg].getPos().y > legs[unmoving_leg].getPos().y)
+  // 		  {
+  // 		    // right
+  // 		    if (moving_leg == 1)
+  // 		    {
+  // 		      
+  // 		    }
+  // 		  }
+  // 		  else
+  // 		  {
+  // 		    // left
+  // 		    
+  // 		  }
+	
+  // 		  ROS_WARN("fst_vel: %f, snd_vel: %f, moving_leg: %d, unmoving_leg: %d, dot_product: %f, pos_norm_1: %f, pos_norm_2: %f, angle: %f, dist_to_pos: %f, dist_to_vel: %f, left_leg: %d, right_leg: %d",
+  // 			  fst_vel, snd_vel, moving_leg, unmoving_leg, dot_product, pos_norm_1, pos_norm_2, temp, dist_to_pos, dist_to_vel, left_right.first, left_right.second);
+    }
+  }
 
   void vis_people(pcl::PCLHeader& header)
   {
@@ -1249,6 +1432,9 @@ public:
 		  legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y);
 	      ma_people.markers.push_back(getOvalMarkerForTwoPoints(id, legs[i].getPos().x,
 		  legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, getPeopleMarkerNextId()));
+	      
+	     checkIfLeftOrRight(i, j);
+	     
 // 	      double start_x = 0.5 * (legs[i].getPos().x + legs[j].getPos().x);
 // 	      double start_y = 0.5 * (legs[i].getPos().x + legs[j].getPos().x);
 // 	      double end_x = legs[i].getPos().x + legs[j].getPos().x;
@@ -1261,6 +1447,32 @@ public:
     }
 
     people_pub.publish(ma_people);
+  }
+  
+  
+  void pubExtendedLine(double x1, double y1, double x2, double y2, int id)
+  {
+    visualization_msgs::Marker line_strip;
+    line_strip.header.frame_id = transform_link;
+    line_strip.header.stamp = ros::Time();
+    line_strip.ns = nh_.getNamespace();
+    line_strip.action = visualization_msgs::Marker::ADD;
+    line_strip.pose.orientation.w = 1.0;
+    line_strip.id = id;
+    line_strip.scale.x = 0.03;
+    line_strip.color.a = 1.0;
+    line_strip.color.r = getRandomNumberFrom0To1();
+    line_strip.color.g = getRandomNumberFrom0To1();
+    line_strip.color.b = getRandomNumberFrom0To1();
+    line_strip.type = visualization_msgs::Marker::LINE_STRIP;
+    geometry_msgs::Point p;
+    p.x = x1;
+    p.y = y1;
+    line_strip.points.push_back(p);
+    p.x = 3 * x2 - x1;
+    p.y = 3 * y2 - y1;
+    line_strip.points.push_back(p);
+    marker_pub.publish(line_strip);
   }
   
   void updatePath(unsigned int pId, pcl::PCLHeader& header, double x1, double y1, double x2, double y2)
@@ -1353,6 +1565,12 @@ public:
       cloud_cluster->height = 1;
       cloud_cluster->is_dense = true;
       
+      if (cloud.points.size() > 2)
+      {
+	pubExtendedLine(0., 0., cloud.points[0].x, cloud.points[0].y, 0);
+	pubExtendedLine(0., 0., cloud.points[cloud.points.size() - 1].x, cloud.points[cloud.points.size() - 1].y, 1);
+      }
+      
       Point min, max;
       pcl::getMinMax3D(*cloud_cluster, min, max);
       min.x -= cluster_bounding_box_uncertainty;
@@ -1367,6 +1585,7 @@ public:
       
     
       Point p; p.x = centroid(0); p.y = centroid(1);
+      
       
       
       /*
@@ -2277,9 +2496,23 @@ public:
     marker_pub.publish(line_strip);
   }
 
+  void resetLeftRight()
+  {
+    left_right = std::make_pair(-1, -1);
+    ij_or_ji = std::make_pair(0, 0);
+    conf_left_right = 0.01;
+//     how_much_times_to_check = 10;
+  }
+  
+  void pub_coordinate_system()
+  {
+    
+  }
 
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
+    pub_coordinate_system();
+    
 //     updatePaths();
     updateLastSeenPeoplePositions();
     for (int i = 0; i < lastSeenPeoplePositions.size(); i++)
@@ -2308,6 +2541,7 @@ public:
     // if there are no leg clutsters longer than 5 seconds the tracking zone will be reset
     if (isOnePersonToTrack && waitForTrackingZoneReset * frequency > 5.0) 
     {
+      resetLeftRight();
       resetTrackingZone();
       waitForTrackingZoneReset = 0;
     }
@@ -2387,7 +2621,10 @@ public:
     vis_people(cloudXYZ.header);
     if (isOnePersonToTrack && legs.size() == 2)
     {
-      pub_triangle();
+//       pub_triangle();
+      double n1 = calculateNorm(legs[0].getPos());
+      double n2 = calculateNorm(legs[1].getPos());
+//       pubExtendedLine(0., 0., (n1 < n2 ? legs[0].getPos().x : legs[1].getPos().x), (n1 < n2 ? legs[0].getPos().y : legs[1].getPos().y));
     }
     vis_tracking_zones();
     ros::Time currtime=ros::Time::now();
