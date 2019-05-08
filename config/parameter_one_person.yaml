@@ -9,16 +9,16 @@ ref_point_x: -0.9
 ref_point_y: 0.0
 
 # zone 1
-#x_lower_limit: -1.9
-#x_upper_limit: -0.2
-#y_lower_limit: -0.8
-#y_upper_limit: 0.8
+x_lower_limit: -1.7
+x_upper_limit: -0.3
+y_lower_limit: -0.7
+y_upper_limit: 0.7
 
 # zone 2
-x_lower_limit: -1.4
-x_upper_limit: -0.4
-y_lower_limit: -0.6
-y_upper_limit: 0.6
+#x_lower_limit: -1.4
+#x_upper_limit: -0.4
+#y_lower_limit: -0.6
+#y_upper_limit: 0.6
 
 # sr1
 #x_lower_limit: 0.3
