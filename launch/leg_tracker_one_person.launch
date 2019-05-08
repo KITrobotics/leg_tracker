@@ -2,9 +2,9 @@
   <node pkg="leg_tracker" type="leg_tracker" name="leg_detection" output="screen">
     <rosparam command="load" file="$(find leg_tracker)/config/general_parameters.yaml"/>
     <rosparam command="load" file="$(find leg_tracker)/config/parameter_one_person.yaml"/>
-    <rosparam command="load" file="$(find leg_tracker)/config/kalman_filter.yaml" />
+    <rosparam command="load" file="$(find leg_tracker)/config/kalman_filter.yaml"/>
 
-    <!-- controllers <remap from="~input_scan" to="/base_laser_front/scan" /> -->
+    <remap from="/scan_rear_raw" to="/base_laser_rear/scan"/>
   </node>
 
 </launch>
