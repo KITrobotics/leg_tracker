@@ -4,18 +4,9 @@ project(leg_tracker)
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++11)
 
-
 find_package(catkin REQUIRED COMPONENTS
-#   actionlib
-#   cob_srvs
-#   control_msgs
-#   diagnostic_msgs
-#   libntcan
-#   libpcan
-#   message_generation
   roslint
   roscpp
-  pluginlib
   roslib
   rosconsole
   sensor_msgs
@@ -30,8 +21,6 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_msgs
   tf2_sensor_msgs
   iirob_filters
-#   trajectory_msgs
-#   urdf
 )
 
 # find_package(Eigen3 REQUIRED)
@@ -45,7 +34,6 @@ else()
   set(Eigen_LIBRARIES ${EIGEN3_LIBRARIES}) 
 endif()
 
-
 # find_package(OpenCV REQUIRED)
 
 find_package(Boost REQUIRED)
@@ -57,9 +45,6 @@ catkin_package(
   DEPENDS EIGEN3
 )
 
-# add_library(kalman src/kalman_filter.cpp)
-# target_link_libraries(kalman ${catkin_LIBRARIES} ${Boost_LIBRARIES})
-
 include_directories(
   include
   ${Boost_INCLUDE_DIRS}
@@ -67,21 +52,16 @@ include_directories(
   ${OpenCV_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
   )
-# include_directories(include ${Boost_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS})
 
-add_executable(${PROJECT_NAME}  src/Munkres.cpp src/leg_tracker.cpp)
-# set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS "-DOSNAME_LINUX -DWITH_ESD_CAN")
+add_executable(${PROJECT_NAME} src/munkres.cpp src/leg_tracker.cpp src/leg_tracker_node.cpp)
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(
   ${PROJECT_NAME}
-#   kalman
   ${Boost_INCLUDE_DIRS}
   ${Eigen_LIBRARIES}
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
   )
-# target_link_libraries(${PROJECT_NAME} ${Boost_INCLUDE_DIRS} ${catkin_LIBRARIES})
-
 
 ### INSTALL ###
 install(TARGETS ${PROJECT_NAME}
@@ -90,7 +70,5 @@ install(TARGETS ${PROJECT_NAME}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-# install(FILES ${PROJECT_SOURCE_DIR}/common/lib/${MYARCH}/libSDHLibrary-CPP.so DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
-
 ### LINT ###
-roslint_cpp(src/Matrix.cpp src/Munkres.cpp src/leg_tracker.cpp)
+roslint_cpp(src/matrix.cpp src/munkres.cpp src/leg_tracker.cpp src/leg_tracker_node.cpp)

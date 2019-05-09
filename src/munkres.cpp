@@ -1,4 +1,5 @@
 /*
+ *   Copyright (c) 2007 John Weaver
  *   Copyright (c) 2015 Miroslav Krajicek
  *
  *   This program is free software; you can redistribute it and/or modify
@@ -16,8 +17,8 @@
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
-#include "boostmatrixadapter.h"
+#include <leg_tracker/munkres.h>
 
-template class BoostMatrixAdapter<double>;
-template class BoostMatrixAdapter<float>;
-template class BoostMatrixAdapter<int>;
+template class Munkres<double>;
+// template class Munkres<float>;
+// template class Munkres<int>;

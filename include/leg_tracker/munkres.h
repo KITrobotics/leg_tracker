@@ -20,14 +20,13 @@
 #if !defined(_MUNKRES_H_)
 #define _MUNKRES_H_
 
-#include "matrix.h"
-
 #include <list>
 #include <utility>
 #include <iostream>
 #include <cmath>
 #include <limits>
 #include <assert.h>
+#include <leg_tracker/matrix.h>
 
 template<typename Data> class Munkres
 {

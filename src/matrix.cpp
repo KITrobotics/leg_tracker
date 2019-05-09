@@ -16,11 +16,9 @@
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
-#include "matrix.h"
-
-#include <cassert>
 #include <cstdlib>
 #include <algorithm>
+#include <leg_tracker/matrix.h>
 
 /*export*/ template <class T>
 Matrix<T>::Matrix() {
@@ -100,7 +98,7 @@ Matrix<T>::operator= (const Matrix<T> &other) {
     m_rows = 0;
     m_columns = 0;
   }
-  
+
   return *this;
 }
 

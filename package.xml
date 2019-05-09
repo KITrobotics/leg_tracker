@@ -7,52 +7,22 @@
     <license>TODO</license>
 
     <buildtool_depend>catkin</buildtool_depend>
-    <build_depend>roslint</build_depend>
-    
     <build_depend>libpcl-all-dev</build_depend>
     <depend>libpcl-all</depend>
-    
-    <depend>geometry_msgs</depend>
-    <depend>laser_geometry</depend>
+    <build_depend>roslint</build_depend>
     <depend>roscpp</depend>
+    <depend>roslib</depend>
+    <depend>rosconsole</depend>
     <depend>sensor_msgs</depend>
     <depend>std_msgs</depend>
     <depend>std_srvs</depend>
-    <depend>tf2</depend>
-    <depend>tf2_ros</depend>
-    <depend>rosconsole</depend>
-<!--     <depend>pluginlib</depend> -->
-    <depend>iirob_filters</depend>
-    <depend>roslib</depend>
-    
+    <depend>geometry_msgs</depend>
+    <depend>laser_geometry</depend>
     <depend>pcl_conversions</depend>
     <depend>pcl_ros</depend>
+    <depend>tf2</depend>
+    <depend>tf2_ros</depend>
     <depend>tf2_msgs</depend>
     <depend>tf2_sensor_msgs</depend>
-    
-  
-    
-
-    
-    <!--<export>
-      <leg_tracker plugin="${prefix}/kalman_filter_plugin.xml" />
-    </export>-->
-    
-    
-<!--     <depend>cv_bridge</depend> -->
-
-<!--     <depend>actionlib</depend> -->
-<!--     <depend>boost</depend> -->
-<!--     <depend>cob_srvs</depend> -->
-<!--     <depend>control_msgs</depend> -->
-<!--     <depend>diagnostic_msgs</depend> -->
-<!--     <depend>dpkg</depend> -->
-<!--     <depend>libntcan</depend> -->
-<!--     <depend>libpcan</depend> -->
-<!--     <depend>libusb-dev</depend> -->
-<!--     <depend>trajectory_msgs</depend> -->
-<!--     <depend>urdf</depend> -->
-
-<!-- 	<exec_depend>laser_filters</exec_depend> -->
-
+    <depend>iirob_filters</depend>
 </package>

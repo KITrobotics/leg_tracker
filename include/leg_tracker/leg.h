@@ -10,20 +10,8 @@
 typedef pcl::PointXYZ Point;
 typedef iirob_filters::MultiChannelKalmanFilter<double> KalmanFilter;
 
-
-// int occluded_dead_age = 10;
-// double variance_observation = 0.25;
-//
-// int min_observations = 4;
-// int state_dimensions = 6;
-
-
 class Leg
 {
-
-// const static int z_coord = 0.178;
-
-
 
 private:
   unsigned int legId;
@@ -31,13 +19,10 @@ private:
   KalmanFilter* filter;
   Point pos;
   Point vel, acc;
-  //std::vector<double> state;
   int observations;
   bool hasPair_;
-  // int min_predictions;
   int min_observations;
   std::vector<std::vector<double> > history;
-//   bool isRemoved;
   int occluded_age;
   int occluded_dead_age;
   double variance_observation;
@@ -234,9 +219,6 @@ public:
   void setPeopleId(int id)
   {
 	  peopleId = id;
-//     if (id == -1) {
-//       dist_travelled = 0.;
-//     }
   }
 
   void setHasPair(bool value)
@@ -255,7 +237,6 @@ public:
     return true;
   }
 
-//   bool likelihood(const double& x, const double& y, double& out)
   double likelihood(const double& x, const double& y)
   {
     std::vector<double> in;

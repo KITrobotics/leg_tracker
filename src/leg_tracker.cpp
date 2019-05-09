@@ -1,190 +1,17 @@
 
-#include <algorithm>
-#include <vector>
-#include <iostream>
-#include <math.h>
-#include <cstdlib>
-#include <fstream>
-#include <tuple>
-
-#include <Eigen/Geometry>
-#include <Eigen/Eigenvalues>
-
-#include <ros/ros.h>
-#include <sensor_msgs/LaserScan.h>
-#include <std_msgs/String.h>
-#include <std_msgs/Float64MultiArray.h>
-#include <laser_geometry/laser_geometry.h>
-#include <sensor_msgs/PointCloud.h>
-#include <sensor_msgs/PointCloud2.h>
-#include <tf2_ros/transform_listener.h>
-#include <tf2/convert.h>
-#include <tf2_ros/buffer.h>
-#include <tf2/transform_datatypes.h>
-#include <tf2_sensor_msgs/tf2_sensor_msgs.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
-#include <geometry_msgs/TransformStamped.h>
-#include "geometry_msgs/PointStamped.h"
-#include "nav_msgs/OccupancyGrid.h"
-#include <nav_msgs/GetMap.h>
-#include <pcl_ros/point_cloud.h>
-#include <pcl/filters/passthrough.h>
-#include <pcl_conversions/pcl_conversions.h>
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
-#include <pcl/filters/radius_outlier_removal.h>
-#include <pcl/common/centroid.h>
-#include <pcl/common/common.h>
-#include <pcl/kdtree/kdtree.h>
-#include <pcl/segmentation/extract_clusters.h>
-#include <visualization_msgs/Marker.h>
-#include <visualization_msgs/MarkerArray.h>
-
-#include <iirob_filters/kalman_filter.h>
-#include <iirob_filters/KalmanFilterParameters.h>
-
-#include "munkres.h"
-#include "leg.h"
-#include "bounding_box.h"
+#include <leg_tracker/leg_tracker.h>
 
 
-
-typedef pcl::PointCloud<Point> PointCloud;
-
-
-class LegDetector
+LegDetector::LegDetector(ros::NodeHandle nh) : nh_(nh), tfListener(tfBuffer)
 {
-private:
-  ros::Subscriber sub;
-  ros::Subscriber global_map_sub;
-  laser_geometry::LaserProjection projector_;
-//   ros::Publisher sensor_msgs_point_cloud_publisher;
-//   ros::Publisher pcl_cloud_publisher;
-  ros::Publisher pos_vel_acc_fst_leg_pub;
-  ros::Publisher pos_vel_acc_snd_leg_pub;
-  ros::Publisher legs_and_vel_direction_publisher;
-  ros::Publisher tracking_area_pub;
-  ros::Publisher people_pub;
-  
-  ros::Publisher marker_pub;
-  ros::Publisher cov_marker_pub;
-//   ros::Publisher bounding_box_pub;
-  ros::Publisher tracking_zone_pub;
-//   ros::Publisher paths_publisher;
-  
-  ros::ServiceClient client; 
-  nav_msgs::GetMap srv;
-
-
-  std::string transform_link;
-  std::string scan_topic;
-  std::string global_map_topic;
-  
-  double x_lower_limit;
-  double x_upper_limit;
-  double y_lower_limit;
-  double y_upper_limit;
-  
-  double x_lower_limit_dynamic;
-  double x_upper_limit_dynamic;
-  double y_lower_limit_dynamic;
-  double y_upper_limit_dynamic;
-  
-  tf2_ros::Buffer tfBuffer;
-  tf2_ros::TransformListener tfListener;
-  double ransac_dist_threshold;
-  std::string circle_fitting;
-  double leg_radius;
-  std::vector<double> centerOfLegLastMeasurement;
-  Point person_center;
-  int legs_gathered;
-  int min_observations;
-  double max_dist_btw_legs;
-  int id_counter;
-  double z_coordinate;
-  double vel_stance_threshold;
-  double vel_swing_threshold;
-  int state_dimensions;
-  int minClusterSize;
-  int maxClusterSize;
-  double clusterTolerance;
-  int occluded_dead_age;
-  double variance_observation;
-
-  bool isOnePersonToTrack;
-  bool isBoundingBoxTracking;
-
-  int legs_marker_next_id;
-  int people_marker_next_id;
-  int next_leg_id;
-  int cov_ellipse_id;
-  int tracking_zone_next_marker_id;
-
-  double max_cov;
-  double min_dist_travelled;
-  double in_free_space_threshold;
-  
-    
-  double mahalanobis_dist_gate;
-  double euclidian_dist_gate;
-  double max_cost;
-  double tracking_bounding_box_uncertainty;
-  double cluster_bounding_box_uncertainty;
-  double outlier_removal_radius;
-  int max_neighbors_for_outlier_removal;
-  
-  double ellipse_x;
-  double ellipse_y;
-  double ellipse_rx;
-  double ellipse_ry;
-  
-  double ref_point_x;
-  double ref_point_y;
-  
-  double waitForTrackingZoneReset;
-  
-  double frequency;
-  
-  nav_msgs::OccupancyGrid global_map;
-  bool got_map;
-  bool with_map;
-  
-  std::vector<Leg> legs;
-  std::vector<Leg> removed_legs;
-  
-  std::vector<BoundingBox> tracking_zones;
-  
-  bool got_map_from_service;
-  
-  // counter, peopleId, last position
-  std::vector<std::tuple<unsigned int, unsigned int, Point> > lastSeenPeoplePositions;
-  
-  std::map<int, visualization_msgs::Marker> paths;
-  
-  int checked, how_much_times_to_check;
-  
-  std::pair<int, int> left_right;
-  double conf_left_right;
-  std::pair<int, int> ij_or_ji;
-  
-
-public:
-  ros::NodeHandle nh_;
-  LegDetector(ros::NodeHandle nh) : nh_(nh), /*params_{std::string(nh_.getNamespace() + "/KalmanFilter")}, */
-      tfListener(tfBuffer)
-  {
     init();
+}
 
-  }
-  ~LegDetector() {}
-
-  void init()
-  { 
+void LegDetector::init()
+{ 
     std::srand(1);
     resetLeftRight();
-//     one_leg_counter.resize(3);
-//     another_leg_counter.resize(3);
-    
+
     nh_.param("scan_topic", scan_topic, std::string("/scan_unified"));
     nh_.param("frequency", frequency, 0.05);
     nh_.param("transform_link", transform_link, std::string("base_link"));
@@ -228,13 +55,11 @@ public:
     
     legs_gathered = id_counter = legs_marker_next_id = next_leg_id = people_marker_next_id = 
 	cov_ellipse_id = 0;
-    got_map = false;	
+    got_map = false;
     got_map_from_service = false;
 
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 1, &LegDetector::processLaserScan, this);
     global_map_sub = nh_.subscribe<nav_msgs::OccupancyGrid>(global_map_topic, 10, &LegDetector::globalMapCallback, this);
-//     sensor_msgs_point_cloud_publisher = nh_.advertise<sensor_msgs::PointCloud2> ("scan2cloud", 300);
-//     pcl_cloud_publisher = nh_.advertise<PointCloud> ("scan2pclCloud", 300);
     pos_vel_acc_fst_leg_pub = nh_.advertise<std_msgs::Float64MultiArray>("posXY_velXY_accXY_lId_pId_conf_fst_leg", 300);
     pos_vel_acc_snd_leg_pub = nh_.advertise<std_msgs::Float64MultiArray>("posXY_velXY_accXY_lId_pId_conf_snd_leg", 300);
     legs_and_vel_direction_publisher = nh_.advertise<visualization_msgs::MarkerArray>("legs_and_vel_direction", 300);
@@ -246,31 +71,30 @@ public:
 //     bounding_box_pub = nh_.advertise<visualization_msgs::Marker>("bounding_box", 300);
     tracking_zone_pub = nh_.advertise<visualization_msgs::MarkerArray>("tracking_zones", 100);
 //     paths_publisher = nh_.advertise<visualization_msgs::MarkerArray>("paths", 100);
-    
 //     client = nh_.serviceClient<nav_msgs::GetMap>("static_map");
   }
   
   
-  double getRandomNumberFrom0To1()
+  double LegDetector::getRandomNumberFrom0To1()
   {
     return (double)rand() / (double)RAND_MAX ;
   }
   
   
-  void globalMapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg) 
+  void LegDetector::globalMapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg) 
   {
     global_map = *msg;
     if (!got_map) { got_map = true; }
   }
   
 
-  double calculateNorm(Point p)
+  double LegDetector::calculateNorm(Point p)
   {
     return std::sqrt(std::pow(p.x, 2) + std::pow(p.y, 2));
   }
   
 
-  visualization_msgs::Marker getCovarianceEllipse(int id, const double meanX, const double meanY, const Eigen::MatrixXd& S)
+  visualization_msgs::Marker LegDetector::getCovarianceEllipse(int id, const double meanX, const double meanY, const Eigen::MatrixXd& S)
   {
 
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(S);
@@ -297,7 +121,7 @@ public:
   }
 
 
-  bool laserScanToPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, sensor_msgs::PointCloud2& cloud)
+  bool LegDetector::laserScanToPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, sensor_msgs::PointCloud2& cloud)
   {
     if (!scan) { ROS_DEBUG("Laser scan pointer was not set!"); return false; }
     projector_.projectLaser(*scan, cloud);
@@ -305,7 +129,7 @@ public:
   }
 
   
-  bool tfTransformOfPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan,
+  bool LegDetector::tfTransformOfPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan,
 				sensor_msgs::PointCloud2& from, sensor_msgs::PointCloud2& to)
   {
     geometry_msgs::TransformStamped transformStamped;
@@ -327,18 +151,7 @@ public:
     return true;
   }
   
-  /*
-   * Position (x, y), Velocity (x, y), Accelaration(x, y), 
-   * leg id, people id, 
-   * confidence // confidence = legs[i].hasPair() * std::max(0., (1 - 0.11 * legs[i].getOccludedAge()))
-   * Left = 1.0 or right 0.0 (isLeft)
-   * conf_left_right // conf_left_right = std::min(1., conf_left_right + 0.1);   // velocity > 0.2 and distance is reduced to plattform
-   * angle = atan2 (y, x) for every leg (y negativ and x egal = a-,   y+ and x egal = angle positiv)
-   * 
-   * 
-   * 
-   */
-  void pub_leg_posvelacc(std::vector<double>& in, bool isSnd)
+  void LegDetector::pub_leg_posvelacc(std::vector<double>& in, bool isSnd)
   {
     // 3 values for legId peopleId and confidence
     if (in.size() != 6 + 3) { ROS_ERROR("Invalid vector of leg posvelacc!"); return; }
@@ -359,10 +172,8 @@ public:
     else { pos_vel_acc_snd_leg_pub.publish(msg); }
   }
 
-
-
   // pass through filtering, outlier removal
-  bool filterPCLPointCloud(const PointCloud& in, PointCloud& out)
+  bool LegDetector::filterPCLPointCloud(const PointCloud& in, PointCloud& out)
   {
     if (in.points.size() < minClusterSize)
     {
@@ -461,24 +272,11 @@ public:
       }
     }
     
-//     if (out.points.size() < 3) { return true; }
-//     
-//     PointCloud temp;
-//     temp.header = out.header;
-//     Point ref_point;
-//     ref_point.x = -0.9;
-//     ref_point.y = 0.;
-//     Point p_with_min_dist_1, p_with_min_dist_2; 
-//     for (Point& p : out)
-//     {
-//        
-//     }
-    
     return true;
   }
 
   
-  Leg initLeg(const Point& p)
+  Leg LegDetector::initLeg(const Point& p)
   {
     Leg l(getNextLegId(), p, occluded_dead_age,
       variance_observation, min_observations, state_dimensions, min_dist_travelled);
@@ -486,7 +284,7 @@ public:
   }
 
 
-  void printLegsInfo(std::vector<Leg> vec, std::string name)
+  void LegDetector::printLegsInfo(std::vector<Leg> vec, std::string name)
   {
     ROS_INFO("%s:", name.c_str());
     for (Leg& l : vec)
@@ -507,7 +305,7 @@ public:
     }
   }
   
-  void printPoinCloudPoints(PointCloud& cloud, std::string name)
+  void LegDetector::printPointCloudPoints(PointCloud& cloud, std::string name)
   {
     ROS_INFO("cloud %s: ", name.c_str());
     int i = 0;
@@ -518,7 +316,7 @@ public:
     }
   }
 
-  void removeOldMarkers(int from, int toExclusive, ros::Publisher ma_publisher)
+  void LegDetector::removeOldMarkers(int from, int toExclusive, ros::Publisher ma_publisher)
   {
     visualization_msgs::MarkerArray ma;
     for (int i = from; i < toExclusive; i++) {
@@ -534,7 +332,7 @@ public:
   }
   
 
-  void visLegs()
+  void LegDetector::visLegs()
   {
     visualization_msgs::MarkerArray ma_leg;
     for (Leg& l : legs)
@@ -553,13 +351,13 @@ public:
     legs_and_vel_direction_publisher.publish(ma_leg);
   }
 
-  unsigned int getNextLegsMarkerId()
+  unsigned int LegDetector::getNextLegsMarkerId()
   {
     return legs_marker_next_id++;
   }
 
 
-  visualization_msgs::Marker getArrowMarker(double start_x, double start_y, double end_x, double end_y, int id)
+  visualization_msgs::Marker LegDetector::getArrowMarker(double start_x, double start_y, double end_x, double end_y, int id)
   {
     visualization_msgs::Marker marker;
     marker.header.frame_id = transform_link;
@@ -584,36 +382,14 @@ public:
     marker.scale.x = 0.05;
     marker.scale.y = 0.1;
     marker.scale.z = 0.2;
-    marker.color.a = 1.0; // Don't forget to set the alpha!
+    marker.color.a = 1.0;
     marker.color.r = 1.0;
     marker.color.r = 1.0;
     return marker;
   }
-
-  
-  visualization_msgs::Marker getMarker(double x, double y, double scale_z, int id)
-  {
-    visualization_msgs::Marker marker;
-    marker.header.frame_id = transform_link;
-    marker.header.stamp = ros::Time();
-    marker.ns = nh_.getNamespace();
-    marker.id = id;
-    marker.type = visualization_msgs::Marker::CYLINDER;
-    marker.action = visualization_msgs::Marker::ADD;
-    marker.pose.position.x = x;
-    marker.pose.position.y = y;
-    marker.pose.position.z = z_coordinate / 2;
-    marker.scale.x = leg_radius;
-    marker.scale.y = leg_radius;
-    marker.scale.z = scale_z;
-    marker.color.a = 1.0; // Don't forget to set the alpha!
-    marker.color.r = 1.0;
-    return marker;
-  }
-  
 
   // only for the user of the robot platform
-  void matchClusterCentroidsToLegs(PointCloud cluster_centroids)
+  void LegDetector::matchClusterCentroidsToLegs(PointCloud cluster_centroids)
   {
     bool toReset = false;
     for (int i = 0; i < legs.size(); i++)
@@ -622,11 +398,6 @@ public:
 	
 	if (legs.size() == 2)
 	{
-// 	  if (distanceBtwTwoPoints(legs[0].getPos(), legs[1].getPos()) < 0.3)
-// 	  {
-// 	    legs[0].predict();
-// 	    legs[1].predict();
-// 	  }
 	  if (legs[i].getOccludedAge() < 3)
 	  {
 	    legs[i].predict();
@@ -683,8 +454,6 @@ public:
 	double mahalanobis_dist = std::sqrt((std::pow((p.x - legs[i].getPos().x), 2) +
 	  std::pow((p.y - legs[i].getPos().y), 2)) / cov);
 	double euclid_dist = distanceBtwTwoPoints(p, legs[i].getPos());
-// 	ROS_INFO("one new point: (%f, %f), for i = %d, legId = %d, cov = %f, maha = %f, euclid = %f, index = %d, min_dis = %f",
-// 		 p.x, p.y, i, legs[i].getLegId(), cov, mahalanobis_dist, euclid_dist, index, min_dist);
 	if (legs.size() == 2)
 	{
 	  if ((i == 0 && distanceBtwTwoPoints(p, legs[1].getPos()) <= 0.05)
@@ -699,11 +468,8 @@ public:
 	  min_dist = mahalanobis_dist;
 	}
       }
-//       ROS_INFO("index = %d", index);
       if (index != -1)
       {
-// 	ROS_INFO("one new point: (%f, %f), legId = %d, index = %d, min_dis = %f",
-// 		p.x, p.y, legs[index].getLegId(), index, min_dist);
 	legs[index].update(p);
 	
 	// clear cloud 
@@ -714,16 +480,6 @@ public:
 	  legs[1 - index].missed();
 	}
       }
-//       if (index = 0)  
-//       { 
-// 	legs[0].update(p);
-// // 	legs[1].missed();
-//       }	
-//       else if (index == 1)
-//       {
-// 	legs[1].update(p);
-// // 	legs[0].missed();
-//       }
     } else if (legs.size() == 1) {
       double min_dist = max_cost;
       int index = -1;
@@ -798,11 +554,6 @@ public:
 	}
       }
       
-      //if (fst_index == -1 || snd_index == -1) { return; }
-      
-//       ROS_WARN("fst_index: %d, best_fst_index: %d, snd_index: %d, best_snd_index: %d",
-// 	       fst_index, best_fst_index, snd_index, best_snd_index);
-      
       if (fst_index != -1)
       {
 	legs[0].update(cluster_centroids.points[fst_index]);
@@ -845,9 +596,6 @@ public:
       y_upper_limit_dynamic = std::max(legs[0].getPos().y, legs[1].getPos().y);
       y_upper_limit_dynamic += uncertainty;
       
-//       ROS_INFO("x_lower_limit_dynamic: %f, x_upper_limit_dynamic: %f, y_lower_limit_dynamic: %f, y_upper_limit_dynamic: %f, flaeche: %f", 
-// 	       x_lower_limit_dynamic, x_upper_limit_dynamic, y_lower_limit_dynamic, y_upper_limit_dynamic, 
-// 	       (x_upper_limit_dynamic - x_lower_limit_dynamic) * (y_upper_limit_dynamic - y_lower_limit_dynamic));
       if (x_lower_limit_dynamic < x_lower_limit) {
 	x_lower_limit_dynamic = x_lower_limit;
       }
@@ -880,8 +628,6 @@ public:
       {
 	if (i == used_point_index) { continue; }
 	double dist = distanceBtwTwoPoints(ref_point, cluster_centroids.points[i]);
-// 	ROS_WARN("i: %d, index: %d, used_point_index: %d, new point: (%f, %f), dist to point (%f, %f): %f, min_dist: %f",
-// 		 i, index, used_point_index, cluster_centroids.points[i].x, cluster_centroids.points[i].y, ref_point.x, ref_point.y, dist, min_dist);
 	if (dist < min_dist && dist < 0.3)
 	{
 	  index = i;
@@ -905,7 +651,7 @@ public:
   }
   
   
-  void resetTrackingZone() 
+  void LegDetector::resetTrackingZone() 
   {
     x_lower_limit_dynamic = x_lower_limit;
     x_upper_limit_dynamic = x_upper_limit;
@@ -914,7 +660,7 @@ public:
   }
   
   
-  double how_much_in_free_space(double x, double y)
+  double LegDetector::how_much_in_free_space(double x, double y)
   {
     // Determine the degree to which the position (x,y) is in freespace according to our global map
     if (!got_map) {
@@ -940,7 +686,7 @@ public:
   }
 
 
-  void separateLegs(int i, int j)
+  void LegDetector::separateLegs(int i, int j)
   {
     int pId = legs[i].getPeopleId();
     legs[i].setHasPair(false);
@@ -962,7 +708,7 @@ public:
   }
 
   
-  void checkDistanceOfLegs()
+  void LegDetector::checkDistanceOfLegs()
   {
     for (int i = 0; i < legs.size(); i++)
     {
@@ -981,7 +727,7 @@ public:
   }
   
 
-  void findPeople()
+  void LegDetector::findPeople()
   {
     checkDistanceOfLegs();
     for (int i = 0; i < legs.size(); i++)
@@ -992,7 +738,7 @@ public:
     }
   }
 
-  void findSecondLeg(int fst_leg)
+  void LegDetector::findSecondLeg(int fst_leg)
   {
     std::vector<int> indices_of_potential_legs;
     for (int i = fst_leg + 1; i < legs.size(); i++)
@@ -1066,19 +812,19 @@ public:
   }
   
 
-  double distanceBtwTwoPoints(double x1, double y1, double x2, double y2)
+  double LegDetector::distanceBtwTwoPoints(double x1, double y1, double x2, double y2)
   {
     return std::sqrt(std::pow(x1 - x2, 2) + std::pow(y1 - y2, 2));
   }
 
   
-  double distanceBtwTwoPoints(Point p1, Point p2)
+  double LegDetector::distanceBtwTwoPoints(Point p1, Point p2)
   {
     return std::sqrt(std::pow(p1.x - p2.x, 2) + std::pow(p1.y - p2.y, 2));
   }
 
 
-  void setPeopleId(int fst_leg, int snd_leg)
+  void LegDetector::setPeopleId(int fst_leg, int snd_leg)
   {
     int id = -1;
     bool isIdSet = false;
@@ -1093,10 +839,6 @@ public:
       Point lastPos = std::get<2>(lastSeenPeoplePositions[i]);
       if (distanceBtwTwoPoints(peoplePos, lastPos) > max_dist_btw_legs) { continue; }
       id = std::get<1>(lastSeenPeoplePositions[i]);
-      
-//       ROS_WARN("new peoplePos: (%f, %f), lastPos: (%f, %f), last id: %d", peoplePos.x, peoplePos.y, lastPos.x, lastPos.y, id);
-      
-//       marker_pub.publish(getArrowMarker(3 * peoplePos.x, 3 * peoplePos.y, 3 * lastPos.x, 3 * lastPos.y, 999999));
       
       restoreId = true;
       removeLastSeenPeoplePosition(i);
@@ -1140,7 +882,7 @@ public:
     }
   }
 
-  void eraseRemovedLegsWithoutId()
+  void LegDetector::eraseRemovedLegsWithoutId()
   {
     for (std::vector<Leg>::iterator it = removed_legs.begin(); it != removed_legs.end(); it++)
     {
@@ -1151,7 +893,7 @@ public:
     }
   }
 
-  void eraseRemovedLeg(int id)
+  void LegDetector::eraseRemovedLeg(int id)
   {
     for (std::vector<Leg>::iterator it = removed_legs.begin(); it != removed_legs.end(); it++)
     {
@@ -1164,7 +906,7 @@ public:
   }
   
   
-  visualization_msgs::Marker getOvalMarker(int id, double x, double y, 
+  visualization_msgs::Marker LegDetector::getOvalMarker(int id, double x, double y, 
       double orientation_x, double orientation_y, double orientation_z, double orientation_w,
       double scale_x, double scale_y, double r, double g, double b)
   {
@@ -1185,7 +927,7 @@ public:
     marker.scale.x = scale_x;
     marker.scale.y = scale_y;
     marker.scale.z = 0.01;
-    marker.color.a = 1.0; // Don't forget to set the alpha!
+    marker.color.a = 1.0;
     marker.color.r = r;
     marker.color.g = g;
     marker.color.b = b;
@@ -1193,7 +935,7 @@ public:
   }
   
 
-  visualization_msgs::Marker getOvalMarkerForTwoPoints(int pId, double x1, double y1, double x2, double y2, int id)
+  visualization_msgs::Marker LegDetector::getOvalMarkerForTwoPoints(int pId, double x1, double y1, double x2, double y2, int id)
   {
     double x = (x1 + x2) / 2;
     double y = (y1 + y2) / 2;
@@ -1231,28 +973,22 @@ public:
   }
   
   
-  void checkIfLeftOrRight(int i, int j)
+  void LegDetector::checkIfLeftOrRight(int i, int j)
   {
     if (legs[i].getPos().y <= legs[j].getPos().y)
     {
-      // leg i is the right leg =^ ji
+      // leg i is the right leg 
       ij_or_ji.second++;
     }
     else
     {
       ij_or_ji.first++;
     }
-//     ROS_WARN("lr or ij: %d, rl or ji: %d", ij_or_ji.first, ij_or_ji.second);
-    
-//     ROS_WARN("i: %d, j: %d, i_id: %d, j_id: %d", i, j, legs[i].getLegId(), legs[j].getLegId());
-  // 	      if (checked < how_much_times_to_check)
-  // 	      {
       // if velocity of one leg is greater than 0.2 m/s and velocity of another leg is smaller than 0.2 m/s
     double fst_vel = calculateNorm(legs[i].getVel());
     double snd_vel = calculateNorm(legs[j].getVel());
     int moving_leg = -1, unmoving_leg = -1;
-//     ROS_WARN("fst_vel: %f, snd_vel: %f,  before  moving_leg: %d, unmoving_leg: %d", fst_vel, snd_vel, moving_leg, unmoving_leg);
-    
+
     if (fst_vel > 0.2 && snd_vel < 0.2)
     {
       moving_leg = i; 
@@ -1263,13 +999,12 @@ public:
       moving_leg = j;
       unmoving_leg = i;
     }
-//     ROS_WARN("fst_vel: %f, snd_vel: %f,  after  moving_leg: %d, unmoving_leg: %d", fst_vel, snd_vel, moving_leg, unmoving_leg);
     
     if (left_right.first == -1)
     {
       if (legs[i].getPos().y <= legs[j].getPos().y)
       {
-	// leg i is the right leg =^ ji
+	// leg i is the right leg 
 	left_right = std::make_pair(legs[j].getLegId(), legs[i].getLegId());
       }
       else
@@ -1280,46 +1015,23 @@ public:
     else if (moving_leg != -1 && unmoving_leg != -1)
     {
       
-      // determine if the moving leg is right or left from unmoving leg
-// 		  double dot_product = legs[moving_leg].getPos().x * legs[unmoving_leg].getPos().x + legs[moving_leg].getPos().y * legs[unmoving_leg].getPos().y;
-// 		  double pos_norm_1 = calculateNorm(legs[moving_leg].getPos());
-// 		  double pos_norm_2 = calculateNorm(legs[unmoving_leg].getPos());
-// 		  double angle = 0.;
-// 		  if (pos_norm_1 != 0 && pos_norm_2 != 0) 
-// 		  { 
-// // 		    angle = acos(dot_product / (pos_norm_1 * pos_norm_2));
-// 		    
-// 		  }
       double Ax = legs[moving_leg].getPos().x;
       double Ay = legs[moving_leg].getPos().y;
       double Bx = legs[moving_leg].getPos().x + legs[moving_leg].getVel().x;
       double By = legs[moving_leg].getPos().y + legs[moving_leg].getVel().y;
       
-      
-// 		  double X = legs[unmoving_leg].getPos().x;
-// 		  double Y = legs[unmoving_leg].getPos().y;
-// 		  double temp = (Bx - Ax) * (Y - Ay) - (By - Ay) * (X - Ax);
-      
-      
       double dist_to_pos = distanceBtwTwoPoints(0., 0., Ax, Ay);
       double dist_to_vel = distanceBtwTwoPoints(0., 0., Bx, By);
       
-//       ROS_WARN("Ax: %f, Ay: %f, Bx: %f, By: %f, dist_to_pos: %f, dist_to_vel: %f", Ax, Ay, Bx, By, dist_to_pos, dist_to_vel);
-      
-//       ROS_WARN("left_right before: %d, %d", left_right.first, left_right.second);
-      
       if (dist_to_pos > dist_to_vel)
       {
-// 	ROS_WARN("dist_to_pos (%f) > dist_to_vel (%f)", dist_to_pos, dist_to_vel);
 	// moving leg is the right leg
 	if (legs[moving_leg].getPos().y <= legs[unmoving_leg].getPos().y)
 	{
-// 	ROS_WARN("legs[moving_leg].getPos().y (%f)  <= legs[unmoving_leg].getPos().y (%f)", legs[moving_leg].getPos().y, legs[unmoving_leg].getPos().y);
 	  // check if this "right" leg is temporary on the right side
 	  if ((moving_leg < unmoving_leg && ij_or_ji.first < ij_or_ji.second) || 
 	    (moving_leg > unmoving_leg && ij_or_ji.first > ij_or_ji.second))
 	  {
-// 	    ROS_WARN("if moving_leg < unmoving_leg && ij_or_ji.first < ij_or_ji.second) || (moving_leg > unmoving_leg && ij_or_ji.first > ij_or_ji.second)), wo------ moving_leg: %d, unmoving_leg: %d, ij_or_ji.first: %d, ij_or_ji.second: %d", moving_leg, unmoving_leg, ij_or_ji.first, ij_or_ji.second);
 	    if (left_right.first != legs[unmoving_leg].getLegId())
 	    {
 	      left_right = std::make_pair(legs[unmoving_leg].getLegId(), legs[moving_leg].getLegId());
@@ -1337,7 +1049,6 @@ public:
 	  if ((moving_leg < unmoving_leg && ij_or_ji.first > ij_or_ji.second) || 
 	    (moving_leg > unmoving_leg && ij_or_ji.first < ij_or_ji.second))
 	  {
-// 	    ROS_WARN("if ((moving_leg < unmoving_leg && ij_or_ji.first > ij_or_ji.second) || (moving_leg > unmoving_leg && ij_or_ji.first < ij_or_ji.second)), wo------ moving_leg: %d, unmoving_leg: %d, ij_or_ji.first: %d, ij_or_ji.second: %d", moving_leg, unmoving_leg, ij_or_ji.first, ij_or_ji.second);
 	    if (left_right.first != legs[moving_leg].getLegId())
 	    {
 	      left_right = std::make_pair(legs[moving_leg].getLegId(), legs[unmoving_leg].getLegId());
@@ -1350,33 +1061,10 @@ public:
 	  }
 	}
       }
-      
-//       ROS_WARN("left_right after: %d, %d", left_right.first, left_right.second);
-	
-      
-      
-      
-      
-  // 		  if (legs[moving_leg].getPos().y > legs[unmoving_leg].getPos().y)
-  // 		  {
-  // 		    // right
-  // 		    if (moving_leg == 1)
-  // 		    {
-  // 		      
-  // 		    }
-  // 		  }
-  // 		  else
-  // 		  {
-  // 		    // left
-  // 		    
-  // 		  }
-	
-  // 		  ROS_WARN("fst_vel: %f, snd_vel: %f, moving_leg: %d, unmoving_leg: %d, dot_product: %f, pos_norm_1: %f, pos_norm_2: %f, angle: %f, dist_to_pos: %f, dist_to_vel: %f, left_leg: %d, right_leg: %d",
-  // 			  fst_vel, snd_vel, moving_leg, unmoving_leg, dot_product, pos_norm_1, pos_norm_2, temp, dist_to_pos, dist_to_vel, left_right.first, left_right.second);
     }
   }
 
-  void vis_people(pcl::PCLHeader& header)
+  void LegDetector::vis_people(pcl::PCLHeader& header)
   {
     visualization_msgs::MarkerArray ma_people;
 
@@ -1407,12 +1095,6 @@ public:
 		l.getPos().y, 
 		getPeopleMarkerNextId()));
 	      
-// 	      double start_x = 0.5 * (legs[i].getPos().x + legs[j].getPos().x);
-// 	      double start_y = 0.5 * (legs[i].getPos().x + legs[j].getPos().x);
-// 	      double end_x = -0.1 * (legs[i].getPos().x + l.getPos().x);
-// 	      double end_y = -0.1 * (legs[i].getPos().y + l.getPos().y);
-// 	      ma_people.markers.push_back(getArrowMarker(0.0, 0.0, end_x, end_y, getPeopleMarkerNextId()));
-	      
 	      break;
 	    }
 	  }
@@ -1431,11 +1113,6 @@ public:
 	      
 	     checkIfLeftOrRight(i, j);
 	     
-// 	      double start_x = 0.5 * (legs[i].getPos().x + legs[j].getPos().x);
-// 	      double start_y = 0.5 * (legs[i].getPos().x + legs[j].getPos().x);
-// 	      double end_x = legs[i].getPos().x + legs[j].getPos().x;
-// 	      double end_y = legs[i].getPos().y + legs[j].getPos().y;
-// 	      ma_people.markers.push_back(getArrowMarker(0., 0., -0.3 * end_x, -0.3 * end_y, getPeopleMarkerNextId()));
 	      break;
 	    }
 	  }
@@ -1445,8 +1122,7 @@ public:
     people_pub.publish(ma_people);
   }
   
-  
-  void pubExtendedLine(double x1, double y1, double x2, double y2, int id)
+  void LegDetector::pubExtendedLine(double x1, double y1, double x2, double y2, int id)
   {
     visualization_msgs::Marker line_strip;
     line_strip.header.frame_id = transform_link;
@@ -1471,21 +1147,18 @@ public:
     marker_pub.publish(line_strip);
   }
   
-  void updatePath(unsigned int pId, pcl::PCLHeader& header, double x1, double y1, double x2, double y2)
+  void LegDetector::updatePath(unsigned int pId, pcl::PCLHeader& header, double x1, double y1, double x2, double y2)
   {
     geometry_msgs::Point p;
     p.x = (x1 + x2) / 2;
     p.y = (y1 + y2) / 2;
-//     ROS_WARN("p: (%f, %f), pId: %d, paths.size: %d", p.x, p.y, pId, (int) paths.size());
     std::map<int, visualization_msgs::Marker>::iterator it = paths.find(pId);
     if (it != paths.end())
     {
       it->second.points.push_back(p);
-//       ROS_WARN("if it->second.points size: %d", (int) it->second.points.size());
     }
     else
     {
-//       ROS_WARN("else");
       visualization_msgs::Marker line_strip;
       line_strip.header.frame_id = header.frame_id;
       line_strip.header.stamp = ros::Time();
@@ -1502,20 +1175,16 @@ public:
       line_strip.points.push_back(p);
       paths.insert(std::make_pair(pId, line_strip));
     }
-//     ROS_WARN("at end of updatePath paths.size: %d", (int) paths.size());
   }
 
 
-  unsigned int getPeopleMarkerNextId() {
+  unsigned int LegDetector::getPeopleMarkerNextId() {
     return people_marker_next_id++;
   }
 
 
-  bool clustering(const PointCloud& cloud, PointCloud& cluster_centroids)
+  bool LegDetector::clustering(const PointCloud& cloud, PointCloud& cluster_centroids)
   {
-//     pcl_cloud_publisher.publish(cloud);
-//     pubWithZCoordinate(cloud);
-
     if (cloud.points.size() < minClusterSize) { ROS_DEBUG("Clustering: Too small number of points!"); return false; }
 
     pcl::search::KdTree<Point>::Ptr tree (new pcl::search::KdTree<Point>);
@@ -1575,44 +1244,11 @@ public:
       max.y += cluster_bounding_box_uncertainty; 
       minMaxPoints.push_back(std::make_pair(min, max));
       
-      
       Eigen::Vector4f centroid;
       pcl::compute3DCentroid(*cloud_cluster, centroid);
       
-    
       Point p; p.x = centroid(0); p.y = centroid(1);
       
-      
-      
-      /*
-      if (with_map && got_map) {
-	
-	bool isPointTransformed = true;
-	geometry_msgs::PointStamped point_in, point_out;
-	
-	point_in.header.frame_id = cloud.header.frame_id;
-	point_in.header.stamp = ros::Time::now();
-	point_in.point.x = p.x; 
-	point_in.point.y = p.y;
-	
-	geometry_msgs::TransformStamped transformStamped;
-	try{
-	  transformStamped = tfBuffer.lookupTransform(global_map.header.frame_id, point_in.header.frame_id, ros::Time(0));
-	}
-	catch (tf2::TransformException &ex) {
-	  ROS_WARN("Failure to lookup the transform for a point! %s\n", ex.what());
-	  isPointTransformed = false;
-	}
-	tf2::doTransform(point_in, point_out, transformStamped);
-    
-	if (isPointTransformed) {
-	  double in_free_space = how_much_in_free_space(point_out.point.x, point_out.point.y);
-	  if (in_free_space > in_free_space_threshold) 
-	  {
-	    continue;
-	  } 
-	}
-      }*/
       
       if (leg_positions.points.size() != 0) {
 	std::vector<int> pointIdxRadius;
@@ -1629,17 +1265,10 @@ public:
 	cluster_centroids.points.push_back(p);
       }
     }
-  
     
     if (cluster_centroids_temp.points.size() == 0) { return true; }
     
     kdtree_clusters.setInputCloud(cluster_centroids_temp.makeShared());
-    
-    
-    
-    /* 
-     * if there are two legs for one cluster then the cluster must be divided
-     */
     
     double radius = 0.2;
     
@@ -1657,7 +1286,6 @@ public:
       int K = 2;
       std::vector<int> pointsIdx(K);
       std::vector<float> pointsSquaredDist(K);
-      
       
 //       radius search
       int count_clusters = kdtree_clusters.radiusSearch(cluster, radius, pointIdxRadius_clusters, 
@@ -1680,8 +1308,6 @@ public:
       
       if (isFstPointInBox && isSndPointInBox)
       { 
-// 	pub_bounding_box(minMaxPoints[i].first.x, minMaxPoints[i].first.y, 
-// 	  minMaxPoints[i].second.x, minMaxPoints[i].second.y);
 	
 	std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin();
 	it += i;
@@ -1726,14 +1352,12 @@ public:
 	cluster_centroids.points.push_back(cluster);
       }
     }
-//     pubWithZCoordinate(cluster_centroids);
-//     pcl_cloud_publisher.publish(cluster_centroids);
     return true;
   }
   
   
   
-  void pub_bounding_box(double min_x, double min_y, double max_x, double max_y)
+  void LegDetector::pub_bounding_box(double min_x, double min_y, double max_x, double max_y)
   {	
     visualization_msgs::Marker marker;
     marker.header.frame_id = transform_link;
@@ -1748,18 +1372,17 @@ public:
     marker.scale.x = max_x - min_x;
     marker.scale.y = max_y - min_y;
     marker.scale.z = 0.01;
-    marker.color.a = 1.0; // Don't forget to set the alpha!
+    marker.color.a = 1.0;
     marker.color.g = 1.0;
-//     bounding_box_pub.publish( marker );
+//     bounding_box_pub.publish(marker);
   }
   
-  void pub_border(double min_x, double min_y, double max_x, double max_y)
+  void LegDetector::pub_border(double min_x, double min_y, double max_x, double max_y)
   {	
     visualization_msgs::Marker marker;
     marker.header.frame_id = transform_link;
     marker.header.stamp = ros::Time();
     marker.ns = nh_.getNamespace();
-//     marker.id = id;
     marker.type = visualization_msgs::Marker::CUBE;
     marker.action = visualization_msgs::Marker::ADD;
     marker.pose.position.x = (max_x + min_x) / 2;
@@ -1768,13 +1391,13 @@ public:
     marker.scale.x = max_x - min_x;
     marker.scale.y = max_y - min_y;
     marker.scale.z = 0.01;
-    marker.color.a = 1.0; // Don't forget to set the alpha!
+    marker.color.a = 1.0;
     marker.color.g = 1.0;
     tracking_area_pub.publish( marker );
   }
   
 
-  void predictLegs()
+  void LegDetector::predictLegs()
   {
     for (int i = 0; i < legs.size(); i++) {
       legs[i].predict(); 
@@ -1786,14 +1409,11 @@ public:
     }
   }
 
-  void removeLegFromVector(std::vector<Leg>& v, unsigned int i)
+  void LegDetector::removeLegFromVector(std::vector<Leg>& v, unsigned int i)
   {
     // save people id at v[i] 
     if (v[i].getPeopleId() != -1 && !v[i].hasPair()) 
     {
-      
-// 	printLegsInfo(removed_legs, "removed_legs to find id " + std::to_string(v[i].getPeopleId()));
-      // find second leg and save people position with people id
       for (int j = 0; j < removed_legs.size(); j++) 
       {
 	if (removed_legs[j].getPeopleId() != v[i].getPeopleId()) { continue; }
@@ -1801,8 +1421,6 @@ public:
 	Point peoplePos;
 	peoplePos.x = (v[i].getPos().x + removed_legs[j].getPos().x) / 2;
 	peoplePos.y = (v[i].getPos().y + removed_legs[j].getPos().y) / 2;
-	
-// 	ROS_WARN("hier peoplePos: %f, %f", peoplePos.x, peoplePos.y);
 	
 	lastSeenPeoplePositions.push_back(std::make_tuple(0, v[i].getPeopleId(), peoplePos));
       }
@@ -1815,7 +1433,7 @@ public:
     v.pop_back();
   }
 
-  void resetHasPair(std::vector<Leg>& v, int fst_leg)
+  void LegDetector::resetHasPair(std::vector<Leg>& v, int fst_leg)
   {
     for (int snd_leg = 0; snd_leg < v.size(); snd_leg++) {
       if (snd_leg != fst_leg && v[snd_leg].getPeopleId() == v[fst_leg].getPeopleId()) {
@@ -1825,7 +1443,7 @@ public:
     }
   }
 
-  void cullDeadTracks(std::vector<Leg>& v)
+  void LegDetector::cullDeadTracks(std::vector<Leg>& v)
   {
     int i = 0;
     while(i < v.size()) {
@@ -1838,23 +1456,13 @@ public:
     }			
   }
 
-  int getNextCovEllipseId()
+  unsigned int LegDetector::getNextCovEllipseId()
   {
     return cov_ellipse_id++;
   }
   
-  void boundingBoxTracking(PointCloud& cluster_centroids)
+  void LegDetector::boundingBoxTracking(PointCloud& cluster_centroids)
   {
-//     if (legs.size() == 0)
-//     {
-//       ROS_INFO("there are no legs at beginning");
-//       for (int i = 0; i < cluster_centroids.size(); i++)
-//       {
-// 	legs.push_back(initLeg(cluster_centroids.points[i]));
-//       }
-//       return;
-//     }
-    
     std::map<int, int> id_to_index_map;
     
     for (int i = 0; i < legs.size(); i++)
@@ -1881,22 +1489,6 @@ public:
       
       tracking_zones[j].update(legs[fst_leg].getPos().x, legs[fst_leg].getPos().y, legs[snd_leg].getPos().x, legs[snd_leg].getPos().y);
     }
-// 	if (legs[i].getPos().x > x_upper_limit || legs[i].getPos().y > y_upper_limit || 
-// 	  legs[i].getPos().x < x_lower_limit || legs[i].getPos().y < y_lower_limit)
-// 	{
-// 	  toReset = true;
-// 	}
-    
-//     printPoinCloudPoints(cluster_centroids, "cluster_centroids");
-    /*
-     * reset tracking zone or remove track
-     */
-//     if (toReset) 
-//     {
-//       legs.clear();
-//       resetTrackingZone();
-//       return;
-//     }
     
     if (cluster_centroids.points.size() == 0) { return; }
     
@@ -1904,8 +1496,6 @@ public:
     
     for (int i = 0; i < tracking_zones.size(); i++)
     {
-//       ROS_INFO("tracking_zone %d, peopleId: %d, fst_leg_id: %d, snd_leg_id: %d", i, tracking_zones[i].getPeopleId(),
-// 	tracking_zones[i].getFstLegId(), tracking_zones[i].getSndLegId());
       PointCloud used_points_cloud;
       used_points_cloud.header = cluster_centroids.header;
       std::map<int, bool>::iterator it;
@@ -1922,7 +1512,6 @@ public:
 	  used_points_cloud.points.push_back(cluster_centroids.points[j]);
 	}
       }
-//       printPoinCloudPoints(used_points_cloud, "used_points_cloud " + std::to_string(i));
       matchClusterCentroids2Legs(tracking_zones[i].getFstLegId(), tracking_zones[i].getSndLegId(), used_points_cloud, i);
     }
     
@@ -1937,8 +1526,6 @@ public:
 	rest_points.points.push_back(cluster_centroids.points[j]);
       }
     }
-    
-//     printPoinCloudPoints(rest_points, "rest_points");
     
     if (rest_points.points.size() == 0) { return; }
     
@@ -1956,12 +1543,8 @@ public:
       }
     }
     
-//     printLegsInfo(legsWithoudPeopleId, "legsWithoudPeopleId before munkres");
-
     assign_munkres(rest_points, legsWithoudPeopleId, fused);
     
-//     printLegsInfo(legsWithoudPeopleId, "legsWithoudPeopleId after munkres");
-
     cullDeadTracks(fused);
     
     for (int i = 0; i < fused.size(); i++) 
@@ -1972,7 +1555,7 @@ public:
     legs = legsWithPeopleId;
   }
   
-  void matchClusterCentroids2Legs(unsigned int fst_leg_id, unsigned int snd_leg_id, PointCloud& cluster_centroids, int tracking_zone_index)
+  void LegDetector::matchClusterCentroids2Legs(unsigned int fst_leg_id, unsigned int snd_leg_id, PointCloud& cluster_centroids, int tracking_zone_index)
   {
     int fst_leg = -1, snd_leg = -1;
     for (int i = 0; i < legs.size(); i++) {
@@ -2021,21 +1604,11 @@ public:
       {
 	double fst_cost = std::sqrt((std::pow((cluster_centroids.points[i].x - legs[fst_leg].getPos().x), 2) +
 	  std::pow((cluster_centroids.points[i].y - legs[fst_leg].getPos().y), 2)) / fst_cov);
-// 	double fst_euclid_dist = distanceBtwTwoPoints(cluster_centroids.points[i], legs[fst_leg].getPos());
-// 	if (fst_euclid_dist > 0.3) 
-// 	{  
-// 	  fst_cost = max_cost;
-// 	}
 	for (int j = 0; j < cluster_centroids.points.size(); j++) 
 	{
 	  if (i == j) { continue; }
 	  double snd_cost = std::sqrt((std::pow((cluster_centroids.points[j].x - legs[i].getPos().x), 2) +
 	    std::pow((cluster_centroids.points[j].y - legs[i].getPos().y), 2)) / snd_cov);
-// 	  double snd_euclid_dist = distanceBtwTwoPoints(cluster_centroids.points[j], legs[snd_leg].getPos());
-// 	  if (snd_euclid_dist > 0.3) 
-// 	  {  
-// 	    snd_cost = max_cost;
-// 	  }
 	  if (fst_cost + snd_cost < total_cost) 
 	  {
 	    total_cost = fst_cost + snd_cost;
@@ -2050,8 +1623,6 @@ public:
       double euclid_dist = distanceBtwTwoPoints(cluster_centroids.points[fst_index], legs[fst_leg].getPos());
       if (euclid_dist < 0.33) 
       {
-// 	ROS_INFO("Match fst point (%f, %f) to leg with id %d and position (%f, %f)", cluster_centroids.points[fst_index].x, cluster_centroids.points[fst_index].y,
-// 		 legs[fst_leg].getLegId(), legs[fst_leg].getPos().x, legs[fst_leg].getPos().y);
 	legs[fst_leg].update(cluster_centroids.points[fst_index]);
       }
       
@@ -2059,71 +1630,16 @@ public:
       euclid_dist = distanceBtwTwoPoints(cluster_centroids.points[snd_index], legs[snd_leg].getPos());
       if (euclid_dist < 0.33) 
       {
-// 	ROS_INFO("Match snd point (%f, %f) to leg with id %d and position (%f, %f)", cluster_centroids.points[snd_index].x, cluster_centroids.points[snd_index].y,
-// 		 legs[snd_leg].getLegId(), legs[snd_leg].getPos().x, legs[snd_leg].getPos().y);
 	legs[snd_leg].update(cluster_centroids.points[snd_index]);
       }
     } 
     
-    
-    /*
-     * udpate tracking zone
-     */
+    //udpate tracking zone
     tracking_zones[tracking_zone_index].update(legs[fst_leg].getPos().x, legs[fst_leg].getPos().y, legs[snd_leg].getPos().x, legs[snd_leg].getPos().y);
-    
-    /*
-    if (legs.size() == 2) {
-      double uncertainty = 0.2;
-      x_lower_limit_dynamic = std::min(legs[fst_leg].getPos().x, legs[snd_leg].getPos().x);
-      x_lower_limit_dynamic -= uncertainty;
-      
-      x_upper_limit_dynamic = std::max(legs[fst_leg].getPos().x, legs[snd_leg].getPos().x);
-      x_upper_limit_dynamic += uncertainty;
-      
-      y_lower_limit_dynamic = std::min(legs[fst_leg].getPos().y, legs[snd_leg].getPos().y);
-      y_lower_limit_dynamic -= uncertainty;
-      
-      y_upper_limit_dynamic = std::max(legs[fst_leg].getPos().y, legs[snd_leg].getPos().y);
-      y_upper_limit_dynamic += uncertainty;
-      */
-//       ROS_INFO("x_lower_limit_dynamic: %f, x_upper_limit_dynamic: %f, y_lower_limit_dynamic: %f, y_upper_limit_dynamic: %f, flaeche: %f", 
-// 	       x_lower_limit_dynamic, x_upper_limit_dynamic, y_lower_limit_dynamic, y_upper_limit_dynamic, 
-// 	       (x_upper_limit_dynamic - x_lower_limit_dynamic) * (y_upper_limit_dynamic - y_lower_limit_dynamic));
-     
-  /*   
-     if (x_lower_limit_dynamic < x_lower_limit) {
-	x_lower_limit_dynamic = x_lower_limit;
-      }
-      if (x_upper_limit_dynamic > x_upper_limit) {
-	x_upper_limit_dynamic = x_upper_limit;
-      }
-      if (y_lower_limit_dynamic < y_lower_limit) {
-	y_lower_limit_dynamic = y_lower_limit;
-      }
-      if (y_upper_limit_dynamic > y_upper_limit) {
-	y_upper_limit_dynamic = y_upper_limit;
-      }
-      if ((x_upper_limit_dynamic - x_lower_limit_dynamic) * (y_upper_limit_dynamic - y_lower_limit_dynamic) < 0.17)
-      {
-	resetTrackingZone();
-      }*/
-//     }
-
-    
-    /*
-     * do something for legs withoud people id
-     */
-//     if (legs.size() < 2) {
-//       for (Point& p : cluster_centroids.points)
-//       {
-// 	legs.push_back(initLeg(p));
-// 	if (legs.size() >= 2) { break; }
-//       }
-//     }
   }
   
 
-  void gnn_munkres(PointCloud& cluster_centroids)
+  void LegDetector::gnn_munkres(PointCloud& cluster_centroids)
   {
     // Filter model predictions
     for (int i = 0; i < legs.size(); i++)
@@ -2158,7 +1674,7 @@ public:
   }
 
   
-  void assign_munkres(const PointCloud& meas,
+  void LegDetector::assign_munkres(const PointCloud& meas,
 		    std::vector<Leg> &tracks,
 		    std::vector<Leg> &fused)
   {
@@ -2272,19 +1788,18 @@ public:
   }
 
   
-  unsigned int getNextLegId()
+  unsigned int LegDetector::getNextLegId()
   {
     return next_leg_id++;
   }
 
 
-  void pub_border_square()
+  void LegDetector::pub_border_square()
   {
     visualization_msgs::Marker marker;
     marker.header.frame_id = transform_link;
     marker.header.stamp = ros::Time();
     marker.ns = nh_.getNamespace();
-//     marker.id = id;
     marker.type = visualization_msgs::Marker::CUBE;
     marker.action = visualization_msgs::Marker::ADD;
     if (isOnePersonToTrack) {
@@ -2303,13 +1818,13 @@ public:
       marker.scale.y = y_upper_limit - y_lower_limit;
     }
     marker.scale.z = 0.01;
-    marker.color.a = 1.0; // Don't forget to set the alpha!
+    marker.color.a = 1.0;
     marker.color.g = 1.0;
     tracking_area_pub.publish( marker );
   }
 
 
-  void removeOldBoundingBox()
+  void LegDetector::removeOldBoundingBox()
   {
       visualization_msgs::Marker marker;
       marker.header.frame_id = transform_link;
@@ -2320,12 +1835,12 @@ public:
 //       bounding_box_pub.publish(marker);
   }
   
-  unsigned int getNextTrackingZoneMarkerId()
+  unsigned int LegDetector::getNextTrackingZoneMarkerId()
   {
     return tracking_zone_next_marker_id++;
   }
   
-  void vis_tracking_zones()
+  void LegDetector::vis_tracking_zones()
   {
     visualization_msgs::MarkerArray ma;
     for (int i = 0; i < tracking_zones.size(); i++) 
@@ -2343,7 +1858,7 @@ public:
       marker.scale.x = tracking_zones[i].getXUpperLimit() - tracking_zones[i].getXLowerLimit();
       marker.scale.y = tracking_zones[i].getYUpperLimit() - tracking_zones[i].getYLowerLimit();
       marker.scale.z = 0.01;
-      marker.color.a = 1.0; // Don't forget to set the alpha!
+      marker.color.a = 1.0;
       marker.color.g = 1.0;
       
       ma.markers.push_back(marker);
@@ -2351,7 +1866,7 @@ public:
     tracking_zone_pub.publish(ma);
   }
   
-  void deleteOldMarkers()
+  void LegDetector::deleteOldMarkers()
   {
     removeOldBoundingBox();
     
@@ -2371,7 +1886,7 @@ public:
     }
   }
   
-  void removeLastSeenPeoplePosition(int i)
+  void LegDetector::removeLastSeenPeoplePosition(int i)
   {
     if (i != lastSeenPeoplePositions.size() - 1)
     {
@@ -2381,7 +1896,7 @@ public:
     lastSeenPeoplePositions.pop_back();
   }
   
-  bool isPointNearToLimits(Point p)
+  bool LegDetector::isPointNearToLimits(Point p)
   {
     return (std::abs(p.x - x_upper_limit) > 0.1 || 
 	    std::abs(p.y - y_upper_limit) > 0.1 || 
@@ -2389,7 +1904,7 @@ public:
 	    std::abs(p.y - y_lower_limit) > 0.1);
   }
   
-  void updateLastSeenPeoplePositions()
+  void LegDetector::updateLastSeenPeoplePositions()
   {
     for (int i = 0; i < lastSeenPeoplePositions.size(); i++)
     {
@@ -2401,7 +1916,6 @@ public:
 	std::map<int, visualization_msgs::Marker>::iterator it = paths.find(pId);
 	if (it != paths.end())
 	{
-// 	  removeOldMarkers(pId, pId + 1, paths_publisher);
 	  paths.erase(it);
 	}
 	removeLastSeenPeoplePosition(i);
@@ -2413,35 +1927,22 @@ public:
     }
   }
   
-  void updatePaths()
+  void LegDetector::updatePaths()
   {
     visualization_msgs::MarkerArray ma;
-//     std::string s = "";
     std::map<int, visualization_msgs::Marker>::iterator it = paths.begin();
     for (; it != paths.end(); it++)
     {
-//       ROS_WARN("pub markers vor if: %d", (int) it->second.points.size());
       if (it->second.points.size() >= 80) 
       {
 	std::rotate(it->second.points.begin(), it->second.points.begin() + 1, it->second.points.end());
 	it->second.points.pop_back();
       }
-//       if (it->second.points.size() > 1) 
-//       {
 	ma.markers.push_back(it->second);
-//       }
-//       for (int i = 0; i < it->second.points.size(); i++)
-//       {
-// 	s += "(" + std::to_string(it->second.points[i].x) + ", " + std::to_string(it->second.points[i].y) + ") "; 
-//       }
-//       s += "\n";
-//       ROS_WARN("pub markers nach if if: %d, points: %s", (int) it->second.points.size(), s.c_str());
     }
-    
-//     paths_publisher.publish(ma);
   }
   
-  void pub_triangle()
+  void LegDetector::pub_triangle()
   {
     visualization_msgs::Marker line_strip;
     line_strip.header.frame_id = transform_link;
@@ -2462,7 +1963,6 @@ public:
     line_strip.points.push_back(p);
     
     bool is_fst_leg = distanceBtwTwoPoints(p.x, p.y, legs[0].getPos().x, legs[0].getPos().y) <= distanceBtwTwoPoints(p.x, p.y, legs[1].getPos().x, legs[1].getPos().y);
-//     ROS_INFO("is_fst_leg: %d, 
     if (is_fst_leg) { p.x = legs[0].getPos().x; p.y = legs[0].getPos().y; }
     else { p.x = legs[1].getPos().x; p.y = legs[1].getPos().y; }
     p.x -= distanceBtwTwoPoints(legs[0].getPos(), legs[1].getPos());
@@ -2479,64 +1979,28 @@ public:
     
     p.y -= to_add;
     
-    
-    
-//     p.x = -1.2; p.y = -0.7;
     line_strip.points.push_back(p);
     if (is_fst_leg) { p.x = legs[1].getPos().x; p.y = legs[1].getPos().y; }
     else { p.x = legs[0].getPos().x; p.y = legs[0].getPos().y; }
     p.x -= distanceBtwTwoPoints(legs[0].getPos(), legs[1].getPos());
     p.y += to_add;
-//     p.x = -1.2; p.y = 0.7;
     line_strip.points.push_back(p);
     p.x = 0.; p.y = 0.;
     line_strip.points.push_back(p);
     marker_pub.publish(line_strip);
   }
 
-  void resetLeftRight()
+  void LegDetector::resetLeftRight()
   {
     left_right = std::make_pair(-1, -1);
     ij_or_ji = std::make_pair(0, 0);
     conf_left_right = 0.01;
-//     how_much_times_to_check = 10;
-  }
-  
-  void pub_coordinate_system()
-  {
-    
   }
 
-  void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
+  void LegDetector::processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
-    pub_coordinate_system();
-    
-//     updatePaths();
     updateLastSeenPeoplePositions();
-//     for (int i = 0; i < lastSeenPeoplePositions.size(); i++)
-//     {
-//       ROS_WARN("time: %d, diff: %f, id: %d, pos: (%f, %f)", std::get<0>(lastSeenPeoplePositions[i]), 
-// 							    5.0 - std::get<0>(lastSeenPeoplePositions[i]) * frequency, 
-// 	       std::get<1>(lastSeenPeoplePositions[i]), std::get<2>(lastSeenPeoplePositions[i]).x, std::get<2>(lastSeenPeoplePositions[i]).y);
-//     }
-//     if (!got_map_from_service) { 
-//       if (client.call(srv))
-//       {
-// 	ROS_INFO("Service GetMap succeeded.");
-// 	got_map_from_service = true;
-//       }
-//       else
-//       {
-// 	ROS_ERROR("Service GetMap failed.");
-//       }
-//     }
-//     ROS_WARN("New Scan");
-//     for (int i = 0; i < tracking_zones.size(); i++) {
-//       ROS_INFO("tracking_zone %d, peopleId: %d, fst_leg_id: %d, snd_leg_id: %d", i, tracking_zones[i].getPeopleId(),
-// 	tracking_zones[i].getFstLegId(), tracking_zones[i].getSndLegId());
-//     }
-//     printLegsInfo(legs, "legs before");
-    // if there are no leg clutsters longer than 5 seconds the tracking zone will be reset
+    
     if (isOnePersonToTrack && waitForTrackingZoneReset * frequency > 5.0) 
     {
       resetLeftRight();
@@ -2569,8 +2033,6 @@ public:
     if (!laserScanToPointCloud2(scan, cloudFromScan)) { predictLegs(); return; }
 
     if (!tfTransformOfPointCloud2(scan, cloudFromScan, tfTransformedCloud)) { predictLegs(); return; }
-
-//     sensor_msgs_point_cloud_publisher.publish(tfTransformedCloud);
 
     pcl::PCLPointCloud2::Ptr pcl_pc2 (new pcl::PCLPointCloud2());
 
@@ -2619,27 +2081,11 @@ public:
     vis_people(cloudXYZ.header);
     if (isOnePersonToTrack && legs.size() == 2)
     {
-//       pub_triangle();
       double n1 = calculateNorm(legs[0].getPos());
       double n2 = calculateNorm(legs[1].getPos());
-//       pubExtendedLine(0., 0., (n1 < n2 ? legs[0].getPos().x : legs[1].getPos().x), (n1 < n2 ? legs[0].getPos().y : legs[1].getPos().y));
     }
     vis_tracking_zones();
     ros::Time currtime=ros::Time::now();
     ros::Duration diff=currtime-lasttime;
-//     std::cout << "Time for processing current laser scan: " << diff << std::endl;
     if (isOnePersonToTrack) { waitForTrackingZoneReset = 0; }
-//     printLegsInfo(legs, "legs after");
   }
-};
-
-
-int main(int argc, char **argv)
-{
-  ros::init(argc, argv,"leg_tracker");
-  ros::NodeHandle nh("~");
-  std::shared_ptr<LegDetector> ld;
-  ld.reset(new LegDetector(nh));
-  ros::spin();
-  return 0;
-}

@@ -1,16 +1,8 @@
-
 #ifndef LEG_TRACKER_BOUNDING_BOX_H
 #define LEG_TRACKER_BOUNDING_BOX_H
 
-
-
-
 class BoundingBox
 {
-
-// const static int z_coord = 0.178;
-
-
 
 private:
   unsigned int fst_leg_id;
@@ -35,18 +27,6 @@ public:
     uncertainty = 0.2;
     
     update(fst_leg_x, snd_leg_x, fst_leg_y, snd_leg_y);
-    /*
-    x_lower_limit = std::min(fst_leg_x, snd_leg_x);
-    x_lower_limit -= uncertainty;
-    
-    x_upper_limit = std::max(fst_leg_x, snd_leg_x);
-    x_upper_limit += uncertainty;
-    
-    y_lower_limit = std::min(fst_leg_y, snd_leg_y);
-    y_lower_limit -= uncertainty;
-    
-    y_upper_limit = std::max(fst_leg_y, snd_leg_y);
-    y_upper_limit += uncertainty;*/
   }
   
   void update(double fst_leg_x, double fst_leg_y, double snd_leg_x, double snd_leg_y)
@@ -116,19 +96,5 @@ public:
     peopleId = id;
   }
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #endif
