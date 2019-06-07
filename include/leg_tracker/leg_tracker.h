@@ -49,6 +49,7 @@
 #include <leg_tracker/munkres.h>
 #include <leg_tracker/leg.h>
 #include <leg_tracker/bounding_box.h>
+#include <leg_tracker/LegTrackerMessage.h>
 
 typedef pcl::PointCloud<Point> PointCloud;
 
@@ -189,7 +190,7 @@ public:
   bool tfTransformOfPointCloud2(const sensor_msgs::LaserScan::ConstPtr& scan, 
                                 sensor_msgs::PointCloud2& from, sensor_msgs::PointCloud2& to);
 
-  void pub_leg_posvelacc(std::vector<double>& in, bool isSnd);
+  void pub_leg_posvelacc(std::vector<double>& in, bool isSnd, std_msgs::Header header);
 
   bool filterPCLPointCloud(const PointCloud& in, PointCloud& out);
   

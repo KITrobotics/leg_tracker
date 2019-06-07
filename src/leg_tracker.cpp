@@ -1,7 +1,6 @@
 
 #include <leg_tracker/leg_tracker.h>
 
-
 LegDetector::LegDetector(ros::NodeHandle nh) : nh_(nh), tfListener(tfBuffer)
 {
     init();
@@ -60,8 +59,8 @@ void LegDetector::init()
 
     sub = nh_.subscribe<sensor_msgs::LaserScan>(scan_topic, 1, &LegDetector::processLaserScan, this);
     global_map_sub = nh_.subscribe<nav_msgs::OccupancyGrid>(global_map_topic, 10, &LegDetector::globalMapCallback, this);
-    pos_vel_acc_fst_leg_pub = nh_.advertise<std_msgs::Float64MultiArray>("posXY_velXY_accXY_lId_pId_conf_fst_leg", 300);
-    pos_vel_acc_snd_leg_pub = nh_.advertise<std_msgs::Float64MultiArray>("posXY_velXY_accXY_lId_pId_conf_snd_leg", 300);
+    pos_vel_acc_fst_leg_pub = nh_.advertise<leg_tracker::LegTrackerMessage>("posXY_velXY_accXY_lId_pId_conf_fst_leg", 300);
+    pos_vel_acc_snd_leg_pub = nh_.advertise<leg_tracker::LegTrackerMessage>("posXY_velXY_accXY_lId_pId_conf_snd_leg", 300);
     legs_and_vel_direction_publisher = nh_.advertise<visualization_msgs::MarkerArray>("legs_and_vel_direction", 300);
     tracking_area_pub = nh_.advertise<visualization_msgs::Marker>("tracking_area", 300);
     people_pub = nh_.advertise<visualization_msgs::MarkerArray>("people", 300);
@@ -151,22 +150,27 @@ void LegDetector::init()
     return true;
   }
   
-  void LegDetector::pub_leg_posvelacc(std::vector<double>& in, bool isSnd)
+  void LegDetector::pub_leg_posvelacc(std::vector<double>& in, bool isSnd, std_msgs::Header header)
   {
     // 3 values for legId peopleId and confidence
     if (in.size() != 6 + 3) { ROS_ERROR("Invalid vector of leg posvelacc!"); return; }
 
-    std_msgs::Float64MultiArray msg;
+    leg_tracker::LegTrackerMessage msg;
+    msg.header = header;
+
+    std_msgs::Float64MultiArray array;
 
     // set up dimensions
-    msg.layout.dim.push_back(std_msgs::MultiArrayDimension());
-    msg.layout.dim[0].size = in.size();
-    msg.layout.dim[0].stride = 1;
-    msg.layout.dim[0].label = "posXY_velXY_accXY_lId_pId_confidence";
+    array.layout.dim.push_back(std_msgs::MultiArrayDimension());
+    array.layout.dim[0].size = in.size();
+    array.layout.dim[0].stride = 1;
+    array.layout.dim[0].label = "posXY_velXY_accXY_lId_pId_confidence";
 
     // copy in the data
-    msg.data.clear();
-    msg.data.insert(msg.data.end(), in.begin(), in.end());
+    array.data.clear();
+    array.data.insert(array.data.end(), in.begin(), in.end());
+
+    msg.array = array;
 
     if (isSnd) { pos_vel_acc_fst_leg_pub.publish(msg); }
     else { pos_vel_acc_snd_leg_pub.publish(msg); }
@@ -2074,7 +2078,7 @@ void LegDetector::init()
 	  current_state.push_back(legs[i].getPeopleId());
 	  confidence = legs[i].hasPair() * std::max(0., (1 - 0.11 * legs[i].getOccludedAge()));
 	  current_state.push_back(confidence);
-	  pub_leg_posvelacc(current_state, i);
+	  pub_leg_posvelacc(current_state, i, scan->header);
 	}
       }
     }
