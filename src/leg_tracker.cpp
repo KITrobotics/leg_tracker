@@ -156,7 +156,8 @@ void LegDetector::init()
     if (in.size() != 6 + 3) { ROS_ERROR("Invalid vector of leg posvelacc!"); return; }
 
     leg_tracker::LegTrackerMessage msg;
-    msg.header = header;
+    msg.header.stamp = header.stamp;
+    msg.frame_id = transform_link;
 
     std_msgs::Float64MultiArray array;
 
