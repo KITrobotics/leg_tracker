@@ -40,12 +40,16 @@ endif()
 find_package(Boost REQUIRED)
 
 add_message_files(DIRECTORY msg FILES
-  LegTrackerMessage.msg
+  LegTrackerMessage.msg # deprecated
+  LegMsg.msg
+  LegMsgStamped.msg
+  PersonMsg.msg
 )
 
 generate_messages(
   DEPENDENCIES
   std_msgs
+  geometry_msgs
 )
 
 catkin_package(

@@ -67,6 +67,8 @@ void LegDetector::init()
     marker_pub = nh_.advertise<visualization_msgs::Marker>("line_strip", 10);
     cov_marker_pub = nh_.advertise<visualization_msgs::MarkerArray>("cov_ellipses", 10);
     
+    people_msg_pub = nh_.advertise<leg_tracker::PersonMsg>("people_msg_stamped", 10);
+    
 //     bounding_box_pub = nh_.advertise<visualization_msgs::Marker>("bounding_box", 300);
     tracking_zone_pub = nh_.advertise<visualization_msgs::MarkerArray>("tracking_zones", 100);
 //     paths_publisher = nh_.advertise<visualization_msgs::MarkerArray>("paths", 100);
@@ -1068,7 +1070,7 @@ void LegDetector::init()
     }
   }
 
-  void LegDetector::vis_people(pcl::PCLHeader& header)
+  void LegDetector::vis_people(std_msgs::Header header)
   {
     visualization_msgs::MarkerArray ma_people;
 
@@ -1078,32 +1080,32 @@ void LegDetector::init()
       if (id == -1) { continue; }
 
       	// second leg is removed
-	if (!legs[i].hasPair())
-	{
-	  for (Leg& l : removed_legs)
-	  {
-	    if (l.getPeopleId() == id)
-	    {
-	      if (distanceBtwTwoPoints(legs[i].getPos(), l.getPos()) > max_dist_btw_legs) {
-		break;
-	      }
-	      updatePath(id, header, 
-		legs[i].getPos().x,
-		legs[i].getPos().y,
-		l.getPos().x, 
-		l.getPos().y);
-	      ma_people.markers.push_back(getOvalMarkerForTwoPoints(id,
-		legs[i].getPos().x,
-		legs[i].getPos().y,
-		l.getPos().x, 
-		l.getPos().y, 
-		getPeopleMarkerNextId()));
-	      
-	      break;
-	    }
-	  }
+        if (!legs[i].hasPair())
+        {
+        for (int j = 0; j < removed_legs.size(); j++)
+        {
+            if (legs[j].getPeopleId() == id)
+            {
+            if (distanceBtwTwoPoints(legs[i].getPos(), legs[j].getPos()) > max_dist_btw_legs) {
+                break;
+            }
+            updatePath(id, header, 
+                    legs[i].getPos().x,
+                    legs[i].getPos().y,
+                    legs[j].getPos().x, 
+                    legs[j].getPos().y);
+            ma_people.markers.push_back(getOvalMarkerForTwoPoints(id,
+                    legs[i].getPos().x,
+                    legs[i].getPos().y,
+                    legs[j].getPos().x, 
+                    legs[j].getPos().y, 
+                    getPeopleMarkerNextId()));
+            publish_person_msg_stamped(i, j, header);
+            break;
+            }
+        }
 
-	} 
+        } 
 	else 
 	{
 	  for (int j = i + 1; j < legs.size(); j++)
@@ -1114,6 +1116,7 @@ void LegDetector::init()
 		  legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y);
 	      ma_people.markers.push_back(getOvalMarkerForTwoPoints(id, legs[i].getPos().x,
 		  legs[i].getPos().y, legs[j].getPos().x, legs[j].getPos().y, getPeopleMarkerNextId()));
+          publish_person_msg_stamped(i, j, header);
 	      
 	     checkIfLeftOrRight(i, j);
 	     
@@ -1151,7 +1154,7 @@ void LegDetector::init()
     marker_pub.publish(line_strip);
   }
   
-  void LegDetector::updatePath(unsigned int pId, pcl::PCLHeader& header, double x1, double y1, double x2, double y2)
+  void LegDetector::updatePath(unsigned int pId, std_msgs::Header header, double x1, double y1, double x2, double y2)
   {
     geometry_msgs::Point p;
     p.x = (x1 + x2) / 2;
@@ -1164,8 +1167,7 @@ void LegDetector::init()
     else
     {
       visualization_msgs::Marker line_strip;
-      line_strip.header.frame_id = header.frame_id;
-      line_strip.header.stamp = ros::Time();
+      line_strip.header = header;
       line_strip.ns = nh_.getNamespace();
       line_strip.action = visualization_msgs::Marker::ADD;
       line_strip.pose.orientation.w = 1.0;
@@ -2000,6 +2002,29 @@ void LegDetector::init()
     ij_or_ji = std::make_pair(0, 0);
     conf_left_right = 0.01;
   }
+  
+  leg_tracker::LegMsg LegDetector::getLegMsg(int leg_index)
+  {
+    leg_tracker::LegMsg legMsg;
+    legMsg.ID = legs[leg_index].getLegId();
+    legMsg.confidence = legs[leg_index].getConfidence();
+    legMsg.position.x = legs[leg_index].getPos().x;
+    legMsg.position.y = legs[leg_index].getPos().y;
+    legMsg.velocity.x = legs[leg_index].getVel().x;
+    legMsg.velocity.y = legs[leg_index].getVel().y;
+    legMsg.acceleration.x = legs[leg_index].getAcc().x;
+    legMsg.acceleration.y = legs[leg_index].getAcc().y;
+    return legMsg;
+  }
+  
+  void LegDetector::publish_person_msg_stamped(int fst_leg_index, int snd_leg_index, std_msgs::Header header) {
+    leg_tracker::PersonMsg msg;
+    msg.header = header;
+    msg.ID = legs[fst_leg_index].getPeopleId();
+    msg.leg1 = getLegMsg(fst_leg_index);
+    msg.leg2 = getLegMsg(snd_leg_index);
+    people_msg_pub.publish(msg);
+  }
 
   void LegDetector::processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
   {
@@ -2022,7 +2047,7 @@ void LegDetector::init()
       }
     }
     
-    ros::Time lasttime=ros::Time::now();
+//     ros::Time lasttime=ros::Time::now();
     
     if (with_map) {
       if (!got_map) { return; }
@@ -2072,24 +2097,24 @@ void LegDetector::init()
       double confidence;
       for (int i = 0; i < legs.size(); i++)
       {
-	if (legs[i].getCurrentState(current_state))
-	{
-	  current_state.push_back(legs[i].getLegId());
-	  current_state.push_back(legs[i].getPeopleId());
-	  confidence = legs[i].hasPair() * std::max(0., (1 - 0.11 * legs[i].getOccludedAge()));
-	  current_state.push_back(confidence);
-	  pub_leg_posvelacc(current_state, i, scan->header);
-	}
+        if (legs[i].getCurrentState(current_state))
+        {
+          current_state.push_back(legs[i].getLegId());
+          current_state.push_back(legs[i].getPeopleId());
+          confidence = legs[i].getConfidence();
+          current_state.push_back(confidence);
+          pub_leg_posvelacc(current_state, i, scan->header);
+        }
       }
     }
-    vis_people(cloudXYZ.header);
-    if (isOnePersonToTrack && legs.size() == 2)
-    {
-      double n1 = calculateNorm(legs[0].getPos());
-      double n2 = calculateNorm(legs[1].getPos());
-    }
+    vis_people(scan->header);
+//     if (isOnePersonToTrack && legs.size() == 2)
+//     {
+//       double n1 = calculateNorm(legs[0].getPos());
+//       double n2 = calculateNorm(legs[1].getPos());
+//     }
     vis_tracking_zones();
-    ros::Time currtime=ros::Time::now();
-    ros::Duration diff=currtime-lasttime;
+//     ros::Time currtime=ros::Time::now();
+//     ros::Duration diff=currtime-lasttime;
     if (isOnePersonToTrack) { waitForTrackingZoneReset = 0; }
   }

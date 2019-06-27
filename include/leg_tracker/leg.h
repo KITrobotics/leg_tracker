@@ -202,6 +202,11 @@ public:
     return vel;
   }
 
+  Point getAcc()
+  {
+    return acc;
+  }
+
   int getPeopleId()
   {
 	  return peopleId;
@@ -244,6 +249,11 @@ public:
     double out = 0.;
     if (!filter->likelihood(in, out)) { ROS_ERROR("Leg.h: Likelihood failed!"); return false; }
     return out;
+  }
+
+  double getConfidence()
+  {
+    return hasPair_ * std::max(0., (1. - 0.11 * occluded_age));
   }
 
 };

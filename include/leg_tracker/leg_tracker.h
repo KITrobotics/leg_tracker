@@ -50,6 +50,8 @@
 #include <leg_tracker/leg.h>
 #include <leg_tracker/bounding_box.h>
 #include <leg_tracker/LegTrackerMessage.h>
+#include <leg_tracker/LegMsg.h>
+#include <leg_tracker/PersonMsg.h>
 
 typedef pcl::PointCloud<Point> PointCloud;
 
@@ -65,6 +67,9 @@ private:
   ros::Publisher legs_and_vel_direction_publisher;
   ros::Publisher tracking_area_pub;
   ros::Publisher people_pub;
+  ros::Publisher fst_leg_msg_pub;
+  ros::Publisher snd_leg_msg_pub;
+  ros::Publisher people_msg_pub;
   
   ros::Publisher marker_pub;
   ros::Publisher cov_marker_pub;
@@ -243,11 +248,11 @@ public:
 
   void checkIfLeftOrRight(int i, int j);
 
-  void vis_people(pcl::PCLHeader& header);
+  void vis_people(std_msgs::Header header);
 
   void pubExtendedLine(double x1, double y1, double x2, double y2, int id);
   
-  void updatePath(unsigned int pId, pcl::PCLHeader& header, 
+  void updatePath(unsigned int pId, std_msgs::Header header, 
                   double x1, double y1, double x2, double y2);
 
   unsigned int getPeopleMarkerNextId();
@@ -302,6 +307,10 @@ public:
   void resetLeftRight();
 
   void processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan);
+  
+  void publish_person_msg_stamped(int fst_leg_index, int snd_leg_index, std_msgs::Header header);
+  
+  leg_tracker::LegMsg getLegMsg(int leg_index);
 };
 
 #endif
