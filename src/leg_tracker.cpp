@@ -158,8 +158,7 @@ void LegDetector::init()
     if (in.size() != 6 + 3) { ROS_ERROR("Invalid vector of leg posvelacc!"); return; }
 
     leg_tracker::LegTrackerMessage msg;
-    msg.header.stamp = header.stamp;
-    msg.frame_id = transform_link;
+    msg.header = header;
 
     std_msgs::Float64MultiArray array;
 
@@ -2092,6 +2091,9 @@ void LegDetector::init()
     }
     visLegs();
     findPeople();
+    std_msgs::Header header;
+    header.stamp = scan->header.stamp;
+    header.frame_id = transform_link;
     if (isOnePersonToTrack && legs.size() == 2)
     {
       std::vector<double> current_state;
@@ -2104,11 +2106,11 @@ void LegDetector::init()
           current_state.push_back(legs[i].getPeopleId());
           confidence = legs[i].getConfidence();
           current_state.push_back(confidence);
-          pub_leg_posvelacc(current_state, i, scan->header);
+          pub_leg_posvelacc(current_state, i, header);
         }
       }
     }
-    vis_people(scan->header);
+    vis_people(header);
 //     if (isOnePersonToTrack && legs.size() == 2)
 //     {
 //       double n1 = calculateNorm(legs[0].getPos());
