@@ -22,6 +22,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_msgs
   tf2_sensor_msgs
   tf2_geometry_msgs
+  visualization_msgs
   iirob_filters
   message_generation
 )
