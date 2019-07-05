@@ -54,7 +54,7 @@ generate_messages(
 
 catkin_package(
   INCLUDE_DIRS include
-  CATKIN_DEPENDS message_runtime std_msgs
+  CATKIN_DEPENDS message_runtime std_msgs tf2_geometry_msgs
   DEPENDS EIGEN3
 )
 
