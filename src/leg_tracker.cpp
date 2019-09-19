@@ -396,7 +396,7 @@ visualization_msgs::Marker LegDetector::getArrowMarker(double start_x, double st
 
 // only for the user of the robot platform
 // centroid to leg association
-void LegDetector::matchClusterCentroidsToLegs(PointCloud cluster_centroids, cluster_number)
+void LegDetector::matchClusterCentroidsToLegs(PointCloud cluster_centroids, std::map<int, pcl::PointCloud<Point>>&  cluster_map)
 {
     bool toReset = false;
     for (int i = 0; i < legs.size(); i++)
@@ -1190,7 +1190,7 @@ unsigned int LegDetector::getPeopleMarkerNextId() {
   }
 
 //Pro Leg Cluster; für bein breite hier
-bool LegDetector::clustering(const PointCloud& cloud, PointCloud& cluster_centroids,  )
+bool LegDetector::clustering(const PointCloud& cloud, PointCloud& cluster_centroids,  std::map<int, pcl::PointCloud<Point>>&  cluster_map)
 {
     if (cloud.points.size() < minClusterSize) { ROS_DEBUG("Clustering: Too small number of points!"); return false; }
 
@@ -1212,7 +1212,8 @@ bool LegDetector::clustering(const PointCloud& cloud, PointCloud& cluster_centro
     PointCloud cluster_centroids_temp, leg_positions;
     cluster_centroids_temp.header = cloud.header;
     leg_positions.header = cloud.header;
-
+    std::map<int, pcl::PointCloud<Point>> temp_cluster_map;
+    
     std::vector<std::pair<Point, Point> > minMaxPoints;
 
     for (Leg& l : legs) 
@@ -1227,7 +1228,8 @@ bool LegDetector::clustering(const PointCloud& cloud, PointCloud& cluster_centro
     if (leg_positions.points.size() != 0) {
         kdtree_legs.setInputCloud(leg_positions.makeShared());
       }
-
+      
+    int idx;
     for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
     {
         pcl::PointCloud<Point>::Ptr cloud_cluster (new pcl::PointCloud<Point>);
@@ -1271,11 +1273,17 @@ bool LegDetector::clustering(const PointCloud& cloud, PointCloud& cluster_centro
                 pointsSquaredDistRadius);
             if (count == 1) {
                 cluster_centroids_temp.points.push_back(leg_positions.points[pointIdxRadius[0]]);
+                idx = cluster_centroids_temp.points.size() - 1;
+                temp_cluster_map.insert(std::make_pair(idx, *cloud_cluster));
               } else {
-                  cluster_centroids_temp.points.push_back(p);
+                    cluster_centroids_temp.points.push_back(p);
+                    idx = cluster_centroids_temp.points.size() - 1;
+                    temp_cluster_map.insert(std::make_pair(idx, *cloud_cluster));
                 }
           } else {
               cluster_centroids.points.push_back(p);
+              idx = cluster_centroids.points.size() - 1;
+              cluster_map.insert(std::make_pair(idx,  *cloud_cluster));
             }
     }
 
@@ -1308,6 +1316,8 @@ bool LegDetector::clustering(const PointCloud& cloud, PointCloud& cluster_centro
 
         if (pointsIdx.size() != K) { 
             cluster_centroids.points.push_back(cluster); 
+            idx = cluster_centroids.points.size() - 1;
+            cluster_map.insert(std::make_pair(idx,  temp_cluster_map[i]));
             continue; 
           }
 
@@ -1318,7 +1328,8 @@ bool LegDetector::clustering(const PointCloud& cloud, PointCloud& cluster_centro
         && (fst_leg.x <= minMaxPoints[i].second.x) && (fst_leg.y <= minMaxPoints[i].second.y);
         bool isSndPointInBox = (snd_leg.x >= minMaxPoints[i].first.x) && (snd_leg.y >= minMaxPoints[i].first.y)
         && (snd_leg.x <= minMaxPoints[i].second.x) && (snd_leg.y <= minMaxPoints[i].second.y);
-
+        
+        // splitting cluster?
         if (isFstPointInBox && isSndPointInBox)
         { 
 
@@ -1339,6 +1350,8 @@ bool LegDetector::clustering(const PointCloud& cloud, PointCloud& cluster_centro
             if (fst.points.size() < minClusterSize || snd.points.size() < minClusterSize) 
             {
                 cluster_centroids.points.push_back(cluster);
+                idx = cluster_centroids.points.size() - 1;
+                cluster_map.insert(std::make_pair(idx,  temp_cluster_map[i]));
                 continue;
             }
 
@@ -1353,16 +1366,26 @@ bool LegDetector::clustering(const PointCloud& cloud, PointCloud& cluster_centro
 
             if (distanceBtwTwoPoints(p_fst, p_snd) < leg_radius) 
             {
+                
                 cluster_centroids.points.push_back(cluster);
+                idx = cluster_centroids.points.size() - 1;
+                cluster_map.insert(std::make_pair(idx,  temp_cluster_map[i]));
                 continue;
             }
 
             cluster_centroids.points.push_back(p_fst);
+            idx = cluster_centroids.points.size() - 1;
+            cluster_map.insert(std::make_pair(idx,  fst));
+            
             cluster_centroids.points.push_back(p_snd);
+            idx = cluster_centroids.points.size() - 1;
+            cluster_map.insert(std::make_pair(idx,  snd));
         }
         else
         {
             cluster_centroids.points.push_back(cluster);
+            idx = cluster_centroids.points.size() - 1;
+            cluster_map.insert(std::make_pair(idx, temp_cluster_map[i]));
         }
     }
     return true;
@@ -2080,13 +2103,14 @@ void LegDetector::processLaserScan(const sensor_msgs::LaserScan::ConstPtr& scan)
     if (!filterPCLPointCloud(cloudXYZ, filteredCloudXYZ)) { predictLegs(); return; }
 
     PointCloud cluster_centroids;
-
-    if (!clustering(filteredCloudXYZ, cluster_centroids)) { predictLegs(); return; }
+    std::map<int, pcl::PointCloud<Point>>  cluster_map;
+    
+    if (!clustering(filteredCloudXYZ, cluster_centroids,  cluster_map)) { predictLegs(); return; }
     if (cluster_centroids.points.size() == 0) { predictLegs(); return; }
 
     if (isOnePersonToTrack) 
     {
-        matchClusterCentroidsToLegs(cluster_centroids);
+        matchClusterCentroidsToLegs(cluster_centroids,  cluster_map);
     } 
     else if (isBoundingBoxTracking) 
     {

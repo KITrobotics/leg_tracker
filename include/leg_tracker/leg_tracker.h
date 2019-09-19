@@ -215,7 +215,7 @@ public:
                                             double end_x, double end_y, int id);
   
   // only for the user of the robot platform
-  void matchClusterCentroidsToLegs(PointCloud cluster_centroids);
+  void matchClusterCentroidsToLegs(PointCloud cluster_centroids, std::map<int, pcl::PointCloud<Point>>&  cluster_map);
     
   void resetTrackingZone();
   
@@ -257,7 +257,7 @@ public:
 
   unsigned int getPeopleMarkerNextId();
 
-  bool clustering(const PointCloud& cloud, PointCloud& cluster_centroids);
+  bool clustering(const PointCloud& cloud, PointCloud& cluster_centroids, std::map<int, pcl::PointCloud<Point>>&  cluster_map);
   
   void pub_bounding_box(double min_x, double min_y, double max_x, double max_y);
   
