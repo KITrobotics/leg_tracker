@@ -68,6 +68,8 @@ void LegDetector::init()
     cov_marker_pub = nh_.advertise<visualization_msgs::MarkerArray>("cov_ellipses", 10);
 
     people_msg_pub = nh_.advertise<leg_tracker::PersonMsg>("people_msg_stamped", 10);
+    
+    center_msg_pub = nh_.advertise<geometry_msgs::PointStamped>("body_center_stamped", 10);
 
     //     bounding_box_pub = nh_.advertise<visualization_msgs::Marker>("bounding_box", 300);
     tracking_zone_pub = nh_.advertise<visualization_msgs::MarkerArray>("tracking_zones", 100);
@@ -398,6 +400,9 @@ visualization_msgs::Marker LegDetector::getArrowMarker(double start_x, double st
 // centroid to leg association
 void LegDetector::matchClusterCentroidsToLegs(PointCloud cluster_centroids, std::map<int, pcl::PointCloud<Point>>&  cluster_map)
 {
+    int cluster1_indx = -1;
+    int cluster2_indx = -1;
+    
     bool toReset = false;
     for (int i = 0; i < legs.size(); i++)
     {
@@ -442,7 +447,7 @@ void LegDetector::matchClusterCentroidsToLegs(PointCloud cluster_centroids, std:
         return;
     }
 
-
+    //No Legs found
     if (cluster_centroids.points.size() == 0) 
     { 
         for (int i = 0; i < legs.size(); i++)
@@ -452,10 +457,12 @@ void LegDetector::matchClusterCentroidsToLegs(PointCloud cluster_centroids, std:
         return; 
     }
 
+    //only one cluster centroid found
     if (cluster_centroids.points.size() == 1) {
         Point p = cluster_centroids.points[0];
         double min_dist = max_cost;
         int index = -1;
+        //centroid belongs to which leg?
         for (int i = 0; i < legs.size(); i++) {
             double cov = legs[i].getMeasToTrackMatchingCov();
             double mahalanobis_dist = std::sqrt((std::pow((p.x - legs[i].getPos().x), 2) +
@@ -486,7 +493,7 @@ void LegDetector::matchClusterCentroidsToLegs(PointCloud cluster_centroids, std:
             {
                 legs[1 - index].missed();
             }
-        }
+        } //Only on Leg but multiple centroids?
       } else if (legs.size() == 1) {
           double min_dist = max_cost;
           int index = -1;
@@ -514,7 +521,7 @@ void LegDetector::matchClusterCentroidsToLegs(PointCloud cluster_centroids, std:
           else
           {
               legs[0].missed();
-          }
+          } //Two legs multiple centroids; match centroids
         } else if (legs.size() == 2 && cluster_centroids.points.size() > 1) {
 
             double total_cost = max_cost;
@@ -585,6 +592,25 @@ void LegDetector::matchClusterCentroidsToLegs(PointCloud cluster_centroids, std:
             else
             {
                 legs[1].missed();
+            }
+            if (fst_index != -1 && snd_index != -1)
+            {
+                auto c1 = cluster_centroids.points[fst_index];
+                auto c2 = cluster_centroids.points[snd_index];
+                
+                Point center;
+                center.x = 0.5 * c1.x + 0.5 * c2.x;
+                center.y = 0.5 * c1.y + 0.5 * c2.y;
+                center.z = 0.5 * c1.z + 0.5 * c2.z;
+                
+                geometry_msgs::PointStamped center_msg;
+                center_msg.header.stamp = ros::Time::now();
+                center_msg.header.frame_id = transform_link;
+                center_msg.point.x = center.x;
+                center_msg.point.y = center.y;
+                center_msg.point.z = center.z;
+                center_msg_pub.publish(center_msg);
+                
             }
           } 
 

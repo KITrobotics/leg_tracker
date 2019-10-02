@@ -70,6 +70,7 @@ private:
   ros::Publisher fst_leg_msg_pub;
   ros::Publisher snd_leg_msg_pub;
   ros::Publisher people_msg_pub;
+  ros::Publisher center_msg_pub;
   
   ros::Publisher marker_pub;
   ros::Publisher cov_marker_pub;
